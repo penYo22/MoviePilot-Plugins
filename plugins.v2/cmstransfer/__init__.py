@@ -318,7 +318,15 @@ class CMSTransfer(_PluginBase):
             logger.error("CMS转存: CMS服务地址或API Token未配置")
             return False
 
+        # Validate URL scheme before sending to CMS
+        valid_schemes = ("magnet:", "ed2k://", "http://", "https://")
+        if not link or not link.lower().startswith(valid_schemes):
+            logger.warning(f"CMS转存: 无效的资源链接格式，仅支持 magnet/ed2k/http/https 协议: {link}")
+            return False
+
         # POST to CMS offline save endpoint
+        # Note: Token is passed in query string as required by the CMS API protocol;
+        # this is a CMS API requirement, not a design choice.
         api_url = f"{self._cms_domain}/api/offline/save?token={self._cms_api_token}"
         try:
             res = RequestUtils(content_type="application/json").post(
@@ -358,6 +366,13 @@ class CMSTransfer(_PluginBase):
         processed_data = self.get_data("processed_files") or {}
         processed_files = set(processed_data.get("files", []))
 
+        # Prune entries whose paths no longer exist on disk to prevent unbounded growth
+        stale_entries = {f for f in processed_files if not Path(f).exists()}
+        if stale_entries:
+            processed_files -= stale_entries
+            logger.debug(f"CMS转存: 清理了 {len(stale_entries)} 条已不存在的记录")
+            self.save_data("processed_files", {"files": list(processed_files)})
+
         # Scan for video files
         new_files_found = False
         for file_path in monitor_dir.rglob("*"):
@@ -380,9 +395,8 @@ class CMSTransfer(_PluginBase):
         if new_files_found:
             # Save updated processed files list
             self.save_data("processed_files", {"files": list(processed_files)})
-
-        # Trigger CMS sync after checking
-        self.__trigger_cms_sync()
+            # Trigger CMS sync only when new files were discovered
+            self.__trigger_cms_sync()
 
     def __recognize_and_rename(self, file_path: Path):
         """
@@ -451,6 +465,8 @@ class CMSTransfer(_PluginBase):
         if not self._cms_domain or not self._cms_api_token:
             return
 
+        # Note: Token is passed in query string as required by the CMS API protocol;
+        # this is a CMS API requirement, not a design choice.
         sync_url = f"{self._cms_domain}/api/sync/lift_by_token?token={self._cms_api_token}&type=lift_sync"
         try:
             res = RequestUtils().get(url=sync_url)
