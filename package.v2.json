@@ -1,0 +1,14 @@
+{
+    "CMSTransfer": {
+        "name": "CMS转存",
+        "description": "搜索资源并通知CMS转存下载，转存完成后自动进行剧集识别和重命名，识别失败通知手动处理",
+        "labels": "转存,115,CMS,媒体整理",
+        "version": "1.0",
+        "icon": "https://raw.githubusercontent.com/penYo22/ccdm/main/icons/cms_transfer.png",
+        "author": "penYo22",
+        "level": 1,
+        "history": {
+            "v1.0": "初始版本：支持资源转存、剧集识别、自动重命名、失败通知"
+        }
+    }
+}
