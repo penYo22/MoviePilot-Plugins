@@ -1,14 +1,15 @@
 {
     "CMSTransfer": {
-        "name": "CMS转存",
-        "description": "搜索资源并通知CMS转存下载，转存完成后自动进行剧集识别和重命名，识别失败通知手动处理",
+        "name": "转存",
+        "description": "通知CMS转存下载，转存完成后自动识别剧集并在云盘内重命名，识别失败通知手动处理",
         "labels": "转存,115,CMS,媒体整理",
-        "version": "1.0",
-        "icon": "https://raw.githubusercontent.com/imaliang/MoviePilot-Plugins/main/icons/cms.png",
+        "version": "1.1",
+        "icon": "QQ_A.png",
         "author": "penYo22",
         "level": 1,
         "history": {
-            "v1.0": "初始版本：支持资源转存、剧集识别、自动重命名、失败通知"
+            "v1.0": "初始版本：支持资源转存、剧集识别、自动重命名、失败通知",
+            "v1.1": "更新插件名、图标，监控目录提示优化，云盘内直接重命名"
         }
     }
 }

@@ -13,10 +13,10 @@ from app.utils.http import RequestUtils
 
 class CMSTransfer(_PluginBase):
     # Plugin metadata
-    plugin_name = "CMS转存"
-    plugin_desc = "搜索资源并通知CMS转存下载，转存完成后自动进行剧集识别和重命名，识别失败通知手动处理"
-    plugin_icon = "https://raw.githubusercontent.com/imaliang/MoviePilot-Plugins/main/icons/cms.png"
-    plugin_version = "1.0"
+    plugin_name = "转存"
+    plugin_desc = "通知CMS转存下载，转存完成后自动识别剧集并在云盘内重命名，识别失败通知手动处理"
+    plugin_icon = "QQ_A.png"
+    plugin_version = "1.1"
     plugin_author = "penYo22"
     author_url = "https://github.com/penYo22"
     plugin_config_prefix = "cmstransfer_"
@@ -28,7 +28,6 @@ class CMSTransfer(_PluginBase):
     _cms_domain: str = "http://172.17.0.1:9527"
     _cms_api_token: str = "cloud_media_sync"
     _monitor_path: str = ""
-    _transfer_type: str = "link"
     _poll_interval: int = 2
     _notify_enabled: bool = False
     _scheduler = None
@@ -45,7 +44,6 @@ class CMSTransfer(_PluginBase):
             self._cms_domain = config.get("cms_domain", "http://172.17.0.1:9527").rstrip("/")
             self._cms_api_token = config.get("cms_api_token", "cloud_media_sync")
             self._monitor_path = config.get("monitor_path", "")
-            self._transfer_type = config.get("transfer_type", "link")
             self._poll_interval = int(config.get("poll_interval", 2))
             self._notify_enabled = config.get("notify_enabled", False)
 
@@ -176,7 +174,7 @@ class CMSTransfer(_PluginBase):
                                 "component": "VCol",
                                 "props": {
                                     "cols": 12,
-                                    "md": 6
+                                    "md": 9
                                 },
                                 "content": [
                                     {
@@ -184,31 +182,7 @@ class CMSTransfer(_PluginBase):
                                         "props": {
                                             "model": "monitor_path",
                                             "label": "监控目录",
-                                            "placeholder": "CMS转存完成后文件所在目录"
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                "component": "VCol",
-                                "props": {
-                                    "cols": 12,
-                                    "md": 3
-                                },
-                                "content": [
-                                    {
-                                        "component": "VSelect",
-                                        "props": {
-                                            "model": "transfer_type",
-                                            "label": "转移方式",
-                                            "items": [
-                                                {"title": "移动", "value": "move"},
-                                                {"title": "复制", "value": "copy"},
-                                                {"title": "硬链接", "value": "link"},
-                                                {"title": "软链接", "value": "softlink"},
-                                                {"title": "Rclone复制", "value": "rclone_copy"},
-                                                {"title": "Rclone移动", "value": "rclone_move"}
-                                            ]
+                                            "placeholder": "在文件管理中复制目录路径，如 /115/待整理"
                                         }
                                     }
                                 ]
@@ -231,6 +205,27 @@ class CMSTransfer(_PluginBase):
                                 ]
                             }
                         ]
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {
+                                    "cols": 12
+                                },
+                                "content": [
+                                    {
+                                        "component": "VAlert",
+                                        "props": {
+                                            "type": "info",
+                                            "variant": "tonal",
+                                            "text": "监控目录请在 MoviePilot 文件管理中浏览到目标目录，复制路径后填入上方输入框，例如 /115/待整理"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
                     }
                 ]
             }
@@ -239,7 +234,6 @@ class CMSTransfer(_PluginBase):
             "cms_domain": "http://172.17.0.1:9527",
             "cms_api_token": "cloud_media_sync",
             "monitor_path": "",
-            "transfer_type": "link",
             "poll_interval": 2,
             "notify_enabled": False
         }
@@ -429,7 +423,7 @@ class CMSTransfer(_PluginBase):
                 path=file_path,
                 meta=meta,
                 mediainfo=mediainfo,
-                transfer_type=self._transfer_type
+                transfer_type="rename"
             )
 
             if transfer_result:
