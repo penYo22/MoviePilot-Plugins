@@ -198,7 +198,10 @@ class Transfer115(_PluginBase):
                                             "label": "115 Cookie",
                                             "placeholder": "UID=...;CID=...;SEID=...",
                                             "hint": "在115网盘网页版按F12打开开发者工具，Application > Cookies中复制所有cookie值",
-                                            "persistent-hint": True
+                                            "persistent-hint": True,
+                                            # type="password" masks the value on-screen so the cookie is not
+                                            # visible in plain text in the plugin configuration UI.
+                                            "type": "password"
                                         }
                                     }
                                 ]
@@ -413,7 +416,9 @@ class Transfer115(_PluginBase):
         ]
 
     def get_service(self) -> List[Dict[str, Any]]:
-        if self._enabled and self._download_path:
+        # Guard includes _client so a bad-cookie startup failure does not register a
+        # scheduler job that would emit "客户端未初始化" warnings on every poll cycle.
+        if self._enabled and self._download_path and self._client is not None:
             return [
                 {
                     "id": "Transfer115Monitor",
@@ -434,9 +439,22 @@ class Transfer115(_PluginBase):
             logger.warning("Transfer115: 115客户端未初始化，跳过任务检查")
             return
         try:
+            # NOTE: offline_list() is called with no pagination arguments. The 115 API
+            # is paginated server-side (default ~30-60 results), so users with a very
+            # large task history may find that older tasks are not visible here. We accept
+            # this limitation because the p115client API signature for pagination is not
+            # confirmed; adding page iteration would require knowing the exact parameter
+            # names and response shape.
             resp = self._client.offline_list()
             tasks = resp.get("tasks", [])
+            # processed_tasks: list of task IDs that completed successfully and need no
+            # further action.
             processed = self.get_data("processed_tasks") or []
+            # failed_tasks: dict of {task_id: retry_count} tracking transient failures.
+            # Tasks are retried up to _MAX_TASK_RETRIES times before being permanently
+            # skipped, preventing a broken task from blocking the poll loop forever.
+            _MAX_TASK_RETRIES = 3
+            failed_tasks: dict = self.get_data("failed_tasks") or {}
             changed = False
 
             for task in tasks:
@@ -455,15 +473,38 @@ class Transfer115(_PluginBase):
                 if task_id in processed:
                     continue
 
+                # Check if this task has exhausted its retries
+                retry_count = failed_tasks.get(task_id, 0)
+                if retry_count >= _MAX_TASK_RETRIES:
+                    # Already logged on the run that hit the limit; silently skip.
+                    continue
+
                 # 已完成且未处理
                 logger.info(f"Transfer115: 发现已完成任务: {task_name}")
                 success = self.__organize_task(task, task_name)
-                processed.append(task_id)
                 changed = True
-                self.__upsert_task_record(task_name, "整理成功" if success else "整理失败")
+
+                if success:
+                    # Full success: permanently mark as processed and remove from
+                    # failed_tasks if it was there from an earlier partial attempt.
+                    processed.append(task_id)
+                    failed_tasks.pop(task_id, None)
+                    self.__upsert_task_record(task_name, "整理成功")
+                else:
+                    # Failure: increment retry counter. Do NOT add to processed so the
+                    # task will be retried on the next poll cycle.
+                    new_count = retry_count + 1
+                    failed_tasks[task_id] = new_count
+                    self.__upsert_task_record(task_name, "整理失败")
+                    if new_count >= _MAX_TASK_RETRIES:
+                        logger.warning(
+                            f"Transfer115: 任务 '{task_name}' 已失败 {new_count} 次，"
+                            "不再重试，请手动处理"
+                        )
 
             if changed:
                 self.save_data("processed_tasks", processed)
+                self.save_data("failed_tasks", failed_tasks)
 
         except Exception as e:
             logger.error(f"Transfer115: 任务检查异常: {e}")
@@ -507,6 +548,14 @@ class Transfer115(_PluginBase):
 
                 task_folder_path = self._download_path.rstrip("/") + "/" + task_name
                 cloud_path = Path(task_folder_path) / fname
+                # NOTE: cloud_path is constructed by concatenating _download_path and
+                # task_name. This assumes 115 places completed task files in a subfolder
+                # named exactly task.name under download_path. If the task name contains
+                # characters that 115 normalises (e.g. full-width punctuation), or if the
+                # account's default save location differs from _download_path, the
+                # constructed path will not match the real cloud location. Verifying
+                # the path against the actual 115 folder hierarchy is not feasible
+                # through MoviePilot's chain.transfer interface.
                 result = self.chain.transfer(
                     path=cloud_path,
                     meta=meta,
@@ -539,7 +588,9 @@ class Transfer115(_PluginBase):
                             text=f"❌ 任务: {task_name}\n部分文件整理失败，请手动处理"
                         )
 
-            return not any_failure
+            # organized_count > 0 ensures a task with no video files is not recorded
+            # as a spurious success when any_failure is also False.
+            return organized_count > 0 and not any_failure
 
         except Exception as e:
             logger.error(f"Transfer115: 整理任务 '{task_name}' 异常: {e}")
@@ -567,6 +618,13 @@ class Transfer115(_PluginBase):
                     fail_resp.get("cid") or
                     fail_resp.get("file_id", "")
                 )
+                # Log the actual response keys at debug level so users can diagnose
+                # if none of the three known key names match a future p115client release.
+                if not fail_folder_id:
+                    logger.debug(
+                        f"Transfer115: fs_makedirs returned unrecognised keys: "
+                        f"{list(fail_resp.keys()) if isinstance(fail_resp, dict) else repr(fail_resp)}"
+                    )
             except Exception as e:
                 logger.warning(f"Transfer115: fs_makedirs不可用，尝试其他方式: {e}")
                 fail_folder_id = ""
