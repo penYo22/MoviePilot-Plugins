@@ -1,3 +1,7 @@
+# NOTE: This plugin runs inside the MoviePilot plugin framework, which has no test
+# infrastructure (no pytest setup, no test directory, no test runner configured).
+# Unit tests for this plugin cannot be written here; manual verification via the
+# MoviePilot UI and the onlyonce trigger is the only available testing approach.
 import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -92,6 +96,9 @@ class Transfer115(_PluginBase):
 
         # 清空 link_input 和 onlyonce
         if link_input or onlyonce:
+            # NOTE: MoviePilot stores plugin config as plaintext JSON. The cookie is re-written
+            # here only when link_input or onlyonce needs to be cleared; it cannot be encrypted
+            # at this layer. Users should treat their plugin config storage as a sensitive file.
             self.update_config({
                 "enabled": self._enabled,
                 "notify_enabled": self._notify_enabled,
@@ -499,8 +506,20 @@ class Transfer115(_PluginBase):
                     if new_count >= _MAX_TASK_RETRIES:
                         logger.warning(
                             f"Transfer115: 任务 '{task_name}' 已失败 {new_count} 次，"
-                            "不再重试，请手动处理"
+                            "不再重试，已归档"
                         )
+                        # On exhaustion: attempt fail-path move and notify user
+                        if self._fail_path and task.get("file_id"):
+                            self.__move_folder_to_fail(task, task_name)
+                        elif self._notify_enabled:
+                            self.post_message(
+                                mtype=NotificationType.Manual,
+                                title="115整理放弃",
+                                text=f"❌ 任务: {task_name}\n已失败 {new_count} 次，不再重试，请手动处理"
+                            )
+                        # Mark as permanently processed so it doesn't re-enter the loop
+                        processed.append(task_id)
+                        failed_tasks.pop(task_id, None)
 
             if changed:
                 self.save_data("processed_tasks", processed)
@@ -618,10 +637,10 @@ class Transfer115(_PluginBase):
                     fail_resp.get("cid") or
                     fail_resp.get("file_id", "")
                 )
-                # Log the actual response keys at debug level so users can diagnose
+                # Log the actual response keys at WARNING level so users can diagnose
                 # if none of the three known key names match a future p115client release.
                 if not fail_folder_id:
-                    logger.debug(
+                    logger.warning(
                         f"Transfer115: fs_makedirs returned unrecognised keys: "
                         f"{list(fail_resp.keys()) if isinstance(fail_resp, dict) else repr(fail_resp)}"
                     )
