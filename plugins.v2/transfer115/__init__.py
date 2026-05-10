@@ -596,16 +596,16 @@ class Transfer115(_PluginBase):
                     any_failure = True
 
             if any_failure:
-                if self._fail_path and file_id:
-                    self.__move_folder_to_fail(task, task_name)
-                else:
-                    logger.warning(f"Transfer115: 任务 '{task_name}' 部分文件整理失败")
-                    if self._notify_enabled:
-                        self.post_message(
-                            mtype=NotificationType.Manual,
-                            title="115整理失败",
-                            text=f"❌ 任务: {task_name}\n部分文件整理失败，请手动处理"
-                        )
+                # Do NOT move the folder here. Folder moves happen only at retry exhaustion
+                # in __check_and_organize, to avoid double-move errors when the same task
+                # is retried multiple times.
+                logger.warning(f"Transfer115: 任务 '{task_name}' 部分文件整理失败，等待重试")
+                if self._notify_enabled:
+                    self.post_message(
+                        mtype=NotificationType.Manual,
+                        title="115整理失败",
+                        text=f"❌ 任务: {task_name}\n部分文件整理失败，将在下次检查时重试"
+                    )
 
             # organized_count > 0 ensures a task with no video files is not recorded
             # as a spurious success when any_failure is also False.
