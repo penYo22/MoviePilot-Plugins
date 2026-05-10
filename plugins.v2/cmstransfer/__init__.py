@@ -202,11 +202,10 @@ class CMSTransfer(_PluginBase):
                                             "model": "transfer_type",
                                             "label": "转移方式",
                                             "items": [
-                                                {"title": "硬链接", "value": "link"},
-                                                {"title": "复制", "value": "copy"},
                                                 {"title": "移动", "value": "move"},
+                                                {"title": "复制", "value": "copy"},
+                                                {"title": "硬链接", "value": "link"},
                                                 {"title": "软链接", "value": "softlink"},
-                                                {"title": "硬链接", "value": "hardlink"},
                                                 {"title": "Rclone复制", "value": "rclone_copy"},
                                                 {"title": "Rclone移动", "value": "rclone_move"}
                                             ]
