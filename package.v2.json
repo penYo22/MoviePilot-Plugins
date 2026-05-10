@@ -4,7 +4,7 @@
         "description": "搜索资源并通知CMS转存下载，转存完成后自动进行剧集识别和重命名，识别失败通知手动处理",
         "labels": "转存,115,CMS,媒体整理",
         "version": "1.0",
-        "icon": "https://raw.githubusercontent.com/penYo22/ccdm/main/icons/cms_transfer.png",
+        "icon": "https://raw.githubusercontent.com/imaliang/MoviePilot-Plugins/main/icons/cms.png",
         "author": "penYo22",
         "level": 1,
         "history": {

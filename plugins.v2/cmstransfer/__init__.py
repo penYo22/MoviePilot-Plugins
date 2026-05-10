@@ -15,7 +15,7 @@ class CMSTransfer(_PluginBase):
     # Plugin metadata
     plugin_name = "CMS转存"
     plugin_desc = "搜索资源并通知CMS转存下载，转存完成后自动进行剧集识别和重命名，识别失败通知手动处理"
-    plugin_icon = "https://raw.githubusercontent.com/penYo22/ccdm/main/icons/cms_transfer.png"
+    plugin_icon = "https://raw.githubusercontent.com/imaliang/MoviePilot-Plugins/main/icons/cms.png"
     plugin_version = "1.0"
     plugin_author = "penYo22"
     author_url = "https://github.com/penYo22"
