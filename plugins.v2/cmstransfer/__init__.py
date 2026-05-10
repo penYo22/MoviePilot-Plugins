@@ -19,7 +19,7 @@ class CMSTransfer(_PluginBase):
     # 插件图标
     plugin_icon = "QQ_A.png"
     # 插件版本
-    plugin_version = "1.3"
+    plugin_version = "1.4"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -57,6 +57,34 @@ class CMSTransfer(_PluginBase):
             self._poll_interval = int(config.get("poll_interval", 2))
             self._notify_enabled = config.get("notify_enabled", False)
 
+            # 处理立即提交的链接
+            link_input = config.get("link_input", "").strip()
+            if link_input:
+                submitted = 0
+                failed = 0
+                for line in link_input.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if self.__send_to_cms(line):
+                        submitted += 1
+                    else:
+                        failed += 1
+                logger.info(f"CMS转存: 链接提交完成，成功 {submitted} 条，失败 {failed} 条")
+                # 清空链接输入，避免重复提交
+                self.update_config({
+                    "enabled": self._enabled,
+                    "auto_organize": self._auto_organize,
+                    "notify_enabled": self._notify_enabled,
+                    "cms_domain": self._cms_domain,
+                    "cms_api_token": self._cms_api_token,
+                    "monitor_path": self._monitor_path,
+                    "fail_movie_path": self._fail_movie_path,
+                    "fail_tv_path": self._fail_tv_path,
+                    "poll_interval": self._poll_interval,
+                    "link_input": ""  # 清空
+                })
+
     def get_state(self) -> bool:
         return self._enabled
 
@@ -82,13 +110,6 @@ class CMSTransfer(_PluginBase):
                 "methods": ["POST"],
                 "auth": "bear",
                 "summary": "CMS转存下载"
-            },
-            {
-                "path": "/transfer_links",
-                "endpoint": self.api_transfer_links,
-                "methods": ["POST"],
-                "auth": "bear",
-                "summary": "批量提交转存链接"
             }
         ]
 
@@ -244,7 +265,30 @@ class CMSTransfer(_PluginBase):
                             }
                         ]
                     },
-                    # 行5：提示说明
+                    # 行5：添加转存链接
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VTextarea",
+                                        "props": {
+                                            "model": "link_input",
+                                            "label": "添加转存链接",
+                                            "placeholder": "支持磁力链接、115分享链接、ed2k链接，每行一个，保存后自动提交",
+                                            "rows": 4,
+                                            "clearable": True,
+                                            "hint": "填写后点击保存即可提交，提交后自动清空"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    # 行6：提示说明
                     {
                         "component": "VRow",
                         "content": [
@@ -277,61 +321,45 @@ class CMSTransfer(_PluginBase):
             "monitor_path": "",
             "fail_movie_path": "",
             "fail_tv_path": "",
-            "poll_interval": 2
+            "poll_interval": 2,
+            "link_input": ""
         }
 
     def get_page(self) -> List[dict]:
+        logs = self.get_data("transfer_log") or []
+        if not logs:
+            return [
+                {
+                    "component": "div",
+                    "text": "暂无转存记录",
+                    "props": {"class": "text-center"}
+                }
+            ]
+        # Show most recent 50 entries, newest first
+        logs = list(reversed(logs[-50:]))
+        rows = []
+        for entry in logs:
+            status_text = "✅ 成功" if entry.get("ok") else "❌ 失败"
+            rows.append({
+                "component": "VListItem",
+                "props": {"density": "compact"},
+                "content": [
+                    {
+                        "component": "VListItemTitle",
+                        "props": {"class": "text-caption text-truncate"},
+                        "text": entry.get("link", "")
+                    },
+                    {
+                        "component": "VListItemSubtitle",
+                        "text": f"{entry.get('time', '')}  {status_text}"
+                    }
+                ]
+            })
         return [
             {
-                "component": "VRow",
-                "content": [
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12},
-                        "content": [
-                            {
-                                "component": "VTextarea",
-                                "props": {
-                                    "model": "link_input",
-                                    "label": "粘贴链接",
-                                    "placeholder": "支持磁力链接、115分享链接、ed2k链接，每行一个",
-                                    "rows": 6,
-                                    "auto-grow": False,
-                                    "clearable": True
-                                }
-                            }
-                        ]
-                    }
-                ]
-            },
-            {
-                "component": "VRow",
-                "content": [
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12},
-                        "content": [
-                            {
-                                "component": "VBtn",
-                                "props": {
-                                    "variant": "tonal",
-                                    "color": "primary",
-                                    "block": True,
-                                    "text": "发送转存任务"
-                                },
-                                "events": {
-                                    "click": {
-                                        "api": "plugin/CMSTransfer/transfer_links",
-                                        "method": "post",
-                                        "params": {
-                                            "links": "{{ link_input }}"
-                                        }
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                ]
+                "component": "VList",
+                "props": {"lines": "two"},
+                "content": rows
             }
         ]
 
@@ -384,32 +412,12 @@ class CMSTransfer(_PluginBase):
             return {"code": 0, "msg": "转存请求已发送"}
         return {"code": 1, "msg": "转存请求发送失败"}
 
-    def api_transfer_links(self, links: str = None, **kwargs) -> dict:
-        """
-        Receive newline-separated links from the page dialog and send each to CMS.
-        """
-        if not self._enabled:
-            return {"code": 1, "msg": "插件未启用"}
-        if not links or not links.strip():
-            return {"code": 1, "msg": "未提供任何链接"}
-
-        results = []
-        for line in links.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            ok = self.__send_to_cms(line)
-            results.append({"link": line[:60] + ("..." if len(line) > 60 else ""), "ok": ok})
-
-        success = sum(1 for r in results if r["ok"])
-        fail = len(results) - success
-        msg = f"共 {len(results)} 条，成功 {success} 条，失败 {fail} 条"
-        return {"code": 0 if fail == 0 else 2, "msg": msg, "data": results}
-
     def __send_to_cms(self, link: str) -> bool:
         """
         将资源链接发送到CMS进行离线下载
         """
+        import datetime
+
         if not self._cms_domain or not self._cms_api_token:
             logger.error("CMS转存: CMS服务地址或API Token未配置")
             return False
@@ -417,6 +425,7 @@ class CMSTransfer(_PluginBase):
         valid_schemes = ("magnet:", "ed2k://", "http://", "https://")
         if not link or not link.lower().startswith(valid_schemes):
             logger.warning(f"CMS转存: 无效链接格式，仅支持 magnet/ed2k/http/https: {link}")
+            self.__append_transfer_log(link, ok=False)
             return False
 
         api_url = f"{self._cms_domain}/api/offline/save?token={self._cms_api_token}"
@@ -427,6 +436,7 @@ class CMSTransfer(_PluginBase):
             )
             if res and res.status_code == 200:
                 logger.info(f"CMS转存: 转存请求发送成功，链接: {link}")
+                self.__append_transfer_log(link, ok=True)
                 if self._notify_enabled:
                     self.post_message(
                         mtype=NotificationType.Organize,
@@ -437,10 +447,29 @@ class CMSTransfer(_PluginBase):
             else:
                 status = res.status_code if res else "无响应"
                 logger.error(f"CMS转存: 转存请求失败，状态码: {status}")
+                self.__append_transfer_log(link, ok=False)
                 return False
         except Exception as e:
             logger.error(f"CMS转存: 转存请求异常: {e}")
+            self.__append_transfer_log(link, ok=False)
             return False
+
+    def __append_transfer_log(self, link: str, ok: bool):
+        """
+        追加转存记录到持久化日志
+        """
+        import datetime
+        log_entry = {
+            "link": link[:80] + ("..." if len(link) > 80 else ""),
+            "ok": ok,
+            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        existing_log = self.get_data("transfer_log") or []
+        existing_log.append(log_entry)
+        # Keep only last 200 entries
+        if len(existing_log) > 200:
+            existing_log = existing_log[-200:]
+        self.save_data("transfer_log", existing_log)
 
     def __check_transfers(self):
         """
