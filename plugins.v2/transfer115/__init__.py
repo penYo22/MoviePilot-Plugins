@@ -21,7 +21,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.11"
+    plugin_version = "3.12"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -237,6 +237,27 @@ class Transfer115(_PluginBase):
                 "methods": ["GET"],
                 "auth": "bear",
                 "summary": "清空插件任务记录"
+            },
+            {
+                "path": "/list_download_folders",
+                "endpoint": self.api_list_download_folders,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "列出下载目录中的子文件夹"
+            },
+            {
+                "path": "/organize_folder",
+                "endpoint": self.api_organize_folder,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "整理单个文件夹"
+            },
+            {
+                "path": "/organize_all",
+                "endpoint": self.api_organize_all,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "一键整理所有文件夹"
             }
         ]
 
@@ -313,6 +334,88 @@ class Transfer115(_PluginBase):
         self.del_data("download_done_tasks")
         logger.info("Transfer115: 插件任务记录已清空")
         return {"code": 0, "msg": "任务记录已清空"}
+
+    def api_list_download_folders(self) -> dict:
+        """列出下载目录中的子文件夹"""
+        if not self._download_path:
+            return {"code": 1, "msg": "未设置下载目录", "folders": []}
+        try:
+            if self._auth_mode == "mp_oauth":
+                from app.chain.storage import StorageChain
+                from app.schemas import FileItem
+                path = self._download_path if self._download_path.endswith("/") else self._download_path + "/"
+                fileitem = FileItem(storage="u115", path=path, type="dir")
+                self._sleep_if_needed()
+                items = StorageChain().list_files(fileitem) or []
+                folders = [
+                    {"name": i.name, "path": i.path, "fileid": i.fileid or ""}
+                    for i in items if i.type == "dir"
+                ]
+            else:  # cookie
+                oper = self._get_cookie_oper()
+                if not oper:
+                    return {"code": 1, "msg": "Cookie客户端初始化失败", "folders": []}
+                folder_id = self._get_folder_id_by_path_cookie(self._download_path, oper)
+                if folder_id is None:
+                    return {"code": 1, "msg": "无法找到下载目录", "folders": []}
+                self._sleep_if_needed()
+                resp = oper.fs_files({"cid": folder_id, "limit": 200})
+                items = resp.get("data", [])
+                folders = [
+                    {"name": i.get("n", ""), "path": self._download_path.rstrip("/") + "/" + i.get("n", ""), "fileid": str(i.get("cid", ""))}
+                    for i in items if i.get("fid") is None and i.get("n")
+                ]
+            return {"code": 0, "folders": folders}
+        except Exception as e:
+            logger.warning(f"Transfer115: 列出下载目录失败: {e}")
+            return {"code": 1, "msg": str(e), "folders": []}
+
+    def api_organize_folder(self, folder_path: str = "", fileid: str = "") -> dict:
+        """整理单个文件夹"""
+        if not folder_path or not fileid:
+            return {"code": 1, "msg": "缺少参数"}
+        try:
+            from app.chain.transfer import TransferChain
+            transfer_kwargs = dict(
+                storage="u115",
+                in_path=Path(folder_path),
+                fileid=fileid,
+                filetype="dir",
+                transfer_type=self._transfer_type,
+            )
+            if self._library_path:
+                transfer_kwargs["target"] = Path(self._library_path)
+            state, errmsg = TransferChain().manual_transfer(**transfer_kwargs)
+            folder_name = Path(folder_path).name
+            if state:
+                self.__upsert_task_record(folder_name, "整理完成")
+                logger.info(f"Transfer115: 手动整理成功: {folder_path}")
+                return {"code": 0, "msg": f"整理成功: {folder_name}"}
+            else:
+                self.__upsert_task_record(folder_name, "整理失败")
+                logger.warning(f"Transfer115: 手动整理失败: {folder_path}，原因: {errmsg}")
+                return {"code": 1, "msg": f"整理失败: {errmsg}"}
+        except Exception as e:
+            logger.error(f"Transfer115: 手动整理异常: {e}")
+            return {"code": 1, "msg": str(e)}
+
+    def api_organize_all(self) -> dict:
+        """一键整理下载目录中的所有文件夹"""
+        result = self.api_list_download_folders()
+        if result.get("code") != 0:
+            return result
+        folders = result.get("folders", [])
+        if not folders:
+            return {"code": 0, "msg": "下载目录中没有子文件夹"}
+        success_count = 0
+        fail_count = 0
+        for folder in folders:
+            r = self.api_organize_folder(folder_path=folder["path"], fileid=folder["fileid"])
+            if r.get("code") == 0:
+                success_count += 1
+            else:
+                fail_count += 1
+        return {"code": 0, "msg": f"整理完成：成功 {success_count} 个，失败 {fail_count} 个"}
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
@@ -772,6 +875,105 @@ class Transfer115(_PluginBase):
             ]
         }
 
+        # SECTION B2: Download folder list for manual organize
+        if self._enabled and self._download_path:
+            folder_list_result = self.api_list_download_folders()
+            folder_list = folder_list_result.get("folders", [])
+            folder_error = folder_list_result.get("msg") if folder_list_result.get("code") != 0 else None
+
+            folder_rows = []
+            if folder_error:
+                folder_rows.append({
+                    "component": "VAlert",
+                    "props": {"type": "warning", "variant": "tonal", "density": "compact", "text": f"获取文件夹列表失败: {folder_error}"}
+                })
+            elif not folder_list:
+                folder_rows.append({
+                    "component": "div",
+                    "text": "下载目录中暂无子文件夹",
+                    "props": {"class": "text-caption text-center pa-2"}
+                })
+            else:
+                for folder in folder_list:
+                    folder_rows.append({
+                        "component": "VListItem",
+                        "props": {"density": "compact"},
+                        "content": [
+                            {
+                                "component": "VListItemTitle",
+                                "props": {"class": "text-body-2 text-truncate"},
+                                "text": folder["name"]
+                            },
+                            {
+                                "component": "VListItemSubtitle",
+                                "content": [
+                                    {
+                                        "component": "VBtn",
+                                        "props": {"size": "x-small", "variant": "tonal", "color": "primary"},
+                                        "text": "整理",
+                                        "events": {
+                                            "click": {
+                                                "api": "plugin/Transfer115/organize_folder",
+                                                "method": "get",
+                                                "params": {"folder_path": folder["path"], "fileid": folder["fileid"]}
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    })
+
+            folder_list_content = [
+                {
+                    "component": "VList",
+                    "props": {"lines": "two", "density": "compact"},
+                    "content": folder_rows
+                }
+            ] if folder_list else folder_rows
+
+            download_folders_section = {
+                "component": "VCard",
+                "props": {"variant": "outlined", "class": "mb-2"},
+                "content": [
+                    {
+                        "component": "VCardTitle",
+                        "props": {"class": "text-body-1"},
+                        "text": f"待整理文件夹（{self._download_path}）"
+                    },
+                    {
+                        "component": "VCardText",
+                        "content": [
+                            {
+                                "component": "VRow",
+                                "props": {"class": "mb-1"},
+                                "content": [
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 12, "class": "text-right"},
+                                        "content": [
+                                            {
+                                                "component": "VBtn",
+                                                "props": {"size": "x-small", "variant": "tonal", "color": "success"},
+                                                "text": "一键全部整理",
+                                                "events": {
+                                                    "click": {
+                                                        "api": "plugin/Transfer115/organize_all",
+                                                        "method": "get"
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ] + folder_list_content
+                    }
+                ]
+            }
+        else:
+            download_folders_section = None
+
         # SECTION C: Directory browser
         browse_path = self.get_data("browse_path") or "/"
 
@@ -1055,6 +1257,7 @@ class Transfer115(_PluginBase):
         return [c for c in [
             status_component,
             config_section,
+            download_folders_section,
             browser_section,
             task_section,
             refresh_section
