@@ -18,11 +18,11 @@ class Transfer115(_PluginBase):
     # 插件名称
     plugin_name = "115离线整理"
     # 插件描述
-    plugin_desc = "使用MoviePilot已存储的115授权，添加离线下载任务，完成后自动识别重命名，失败文件夹整体归档"
+    plugin_desc = "使用MoviePilot已存储的115授权或自填Cookie，添加离线下载任务，完成后自动识别重命名，失败文件夹整体归档"
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "2.0"
+    plugin_version = "3.0"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -41,6 +41,8 @@ class Transfer115(_PluginBase):
     _fail_path: str = ""
     _poll_interval: int = 5
     _transfer_type: str = "move"
+    _auth_mode: str = "mp_oauth"
+    _cookie: str = ""
 
     # 支持的视频文件扩展名
     _video_extensions = (".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov")
@@ -56,12 +58,32 @@ class Transfer115(_PluginBase):
             logger.warning(f"Transfer115: 获取115存储实例失败: {e}")
         return None
 
+    def _get_cookie_oper(self):
+        """Initialize P115Client with stored cookie."""
+        if not self._cookie:
+            return None
+        try:
+            from p115client import P115Client
+            client = P115Client(cookies=self._cookie)
+            return client
+        except Exception as e:
+            logger.warning(f"Transfer115: 初始化Cookie客户端失败: {e}")
+            return None
+
+    def _get_oper(self):
+        """Return oper based on auth_mode."""
+        if self._auth_mode == "cookie":
+            return self._get_cookie_oper()
+        return self._get_u115_oper()
+
     def init_plugin(self, config: dict = None):
         if not config:
             return
 
         self._enabled = config.get("enabled", False)
         self._notify_enabled = config.get("notify_enabled", False)
+        self._auth_mode = config.get("auth_mode", "mp_oauth")
+        self._cookie = config.get("cookie", "").strip()
         self._download_path = config.get("download_path", "").strip()
         self._fail_path = config.get("fail_path", "").strip()
         self._poll_interval = int(config.get("poll_interval", 5) or 5)
@@ -72,14 +94,17 @@ class Transfer115(_PluginBase):
         if link_input:
             lines = [l.strip() for l in link_input.splitlines() if l.strip()]
             if lines:
-                oper = self._get_u115_oper()
+                oper = self._get_oper()
                 if oper:
                     try:
-                        oper._request_api(
-                            "POST",
-                            "/open/offline/add_task_urls",
-                            data={"urls": "\n".join(lines)}
-                        )
+                        if self._auth_mode == "cookie":
+                            oper.offline_add_urls({"urls": "\n".join(lines)})
+                        else:
+                            oper._request_api(
+                                "POST",
+                                "/open/offline/add_task_urls",
+                                data={"urls": "\n".join(lines)}
+                            )
                         logger.info(f"Transfer115: 添加离线任务成功，共 {len(lines)} 条")
                         if self._notify_enabled:
                             self.post_message(
@@ -90,7 +115,7 @@ class Transfer115(_PluginBase):
                     except Exception as e:
                         logger.error(f"Transfer115: 添加离线任务失败: {e}")
                 else:
-                    logger.warning("Transfer115: 链接已填写但115未授权（请前往 设置 → 存储 → 115网盘 完成扫码登录）")
+                    logger.warning("Transfer115: 链接已填写但115未授权或Cookie无效")
 
         # 处理立即执行
         onlyonce = config.get("onlyonce", False)
@@ -102,6 +127,8 @@ class Transfer115(_PluginBase):
             self.update_config({
                 "enabled": self._enabled,
                 "notify_enabled": self._notify_enabled,
+                "auth_mode": self._auth_mode,
+                "cookie": self._cookie,
                 "download_path": self._download_path,
                 "fail_path": self._fail_path,
                 "poll_interval": self._poll_interval,
@@ -125,6 +152,27 @@ class Transfer115(_PluginBase):
                 "methods": ["GET"],
                 "auth": "bear",
                 "summary": "手动触发115离线任务检查"
+            },
+            {
+                "path": "/list_dirs",
+                "endpoint": self.api_list_dirs,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "列出115目录"
+            },
+            {
+                "path": "/set_path",
+                "endpoint": self.api_set_path,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "设置目录配置"
+            },
+            {
+                "path": "/nav_dir",
+                "endpoint": self.api_nav_dir,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "导航到目录"
             }
         ]
 
@@ -132,18 +180,63 @@ class Transfer115(_PluginBase):
         """手动触发任务检查"""
         if not self._enabled:
             return {"code": 1, "msg": "插件未启用"}
-        oper = self._get_u115_oper()
+        oper = self._get_oper()
         if not oper:
-            return {"code": 1, "msg": "115网盘未授权，请前往 设置 → 存储 → 115网盘 完成扫码登录"}
+            return {"code": 1, "msg": "115网盘未授权或Cookie无效"}
         self.__check_and_organize()
         return {"code": 0, "msg": "任务检查已触发"}
+
+    def api_list_dirs(self, path: str = "/") -> dict:
+        """列出115目录"""
+        try:
+            from app.chain.storage import StorageChain
+            from app.schemas import FileItem
+            if not path.endswith("/"):
+                path = path + "/"
+            fileitem = FileItem(storage="u115", path=path, type="dir")
+            items = StorageChain().list_files(fileitem) or []
+            dirs = [{"name": i.name, "path": i.path} for i in items if i.type == "dir"]
+            return {"code": 0, "dirs": dirs}
+        except Exception as e:
+            logger.warning(f"Transfer115: 列出目录失败: {e}")
+            return {"code": 1, "msg": str(e), "dirs": []}
+
+    def api_set_path(self, field: str = "", path: str = "/") -> dict:
+        """设置目录配置"""
+        if field not in ("download_path", "fail_path"):
+            return {"code": 1, "msg": "无效字段"}
+        clean_path = path.rstrip("/") if path != "/" else "/"
+        conf = {
+            "enabled": self._enabled,
+            "notify_enabled": self._notify_enabled,
+            "auth_mode": self._auth_mode,
+            "cookie": self._cookie,
+            "download_path": self._download_path,
+            "fail_path": self._fail_path,
+            "poll_interval": self._poll_interval,
+            "transfer_type": self._transfer_type,
+            "onlyonce": False,
+            "link_input": ""
+        }
+        conf[field] = clean_path
+        self.update_config(conf)
+        if field == "download_path":
+            self._download_path = clean_path
+        else:
+            self._fail_path = clean_path
+        return {"code": 0, "msg": f"已设置 {field} 为 {clean_path}"}
+
+    def api_nav_dir(self, path: str = "/") -> dict:
+        """导航到目录"""
+        self.save_data("browse_path", path)
+        return {"code": 0}
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
             {
                 "component": "VForm",
                 "content": [
-                    # 行1：开关区 + 授权状态提示
+                    # 行1：启用插件 | 发送通知 | 授权方式
                     {
                         "component": "VRow",
                         "content": [
@@ -178,6 +271,52 @@ class Transfer115(_PluginBase):
                                 "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
+                                        "component": "VSelect",
+                                        "props": {
+                                            "model": "auth_mode",
+                                            "label": "授权方式",
+                                            "items": [
+                                                {"title": "共用MP授权", "value": "mp_oauth"},
+                                                {"title": "手动填写Cookie", "value": "cookie"}
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    # 行2：Cookie输入（始终渲染，仅cookie模式需填写）
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 12},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "cookie",
+                                            "label": "Cookie",
+                                            "type": "password",
+                                            "hint": "仅选择「手动填写Cookie」模式时需要填写，MP OAuth模式请留空",
+                                            "placeholder": "填写115网盘Cookie字符串（UID=xxx;CID=xxx;SEID=xxx 格式）",
+                                            "persistent-hint": True
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    # 行3：授权状态提示
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 12},
+                                "content": [
+                                    {
                                         "component": "VAlert",
                                         "props": {
                                             "type": "info",
@@ -190,7 +329,7 @@ class Transfer115(_PluginBase):
                             }
                         ]
                     },
-                    # 行2：目录配置
+                    # 行4：目录配置
                     {
                         "component": "VRow",
                         "content": [
@@ -203,7 +342,7 @@ class Transfer115(_PluginBase):
                                         "props": {
                                             "model": "download_path",
                                             "label": "离线下载保存目录",
-                                            "placeholder": "如 /待整理 （115云盘内路径）"
+                                            "placeholder": "如 /待整理 （115云盘内路径，可在数据页可视化选择）"
                                         }
                                     }
                                 ]
@@ -224,7 +363,7 @@ class Transfer115(_PluginBase):
                             }
                         ]
                     },
-                    # 行3：参数配置（含立即检查一次开关）
+                    # 行5：参数配置（含立即检查一次开关）
                     {
                         "component": "VRow",
                         "content": [
@@ -268,7 +407,7 @@ class Transfer115(_PluginBase):
                                         "props": {
                                             "model": "onlyonce",
                                             "label": "立即检查一次",
-                                            "hint": "保存后立即执行一次任务检查，执行后自动关闭",
+                                            "hint": "保存后立即执行一次",
                                             "persistent-hint": True
                                         }
                                     }
@@ -276,7 +415,7 @@ class Transfer115(_PluginBase):
                             }
                         ]
                     },
-                    # 行4：添加离线下载链接
+                    # 行6：添加离线下载链接
                     {
                         "component": "VRow",
                         "content": [
@@ -299,7 +438,7 @@ class Transfer115(_PluginBase):
                             }
                         ]
                     },
-                    # 行5：说明
+                    # 行7：说明
                     {
                         "component": "VRow",
                         "content": [
@@ -313,11 +452,10 @@ class Transfer115(_PluginBase):
                                             "type": "info",
                                             "variant": "tonal",
                                             "text": (
-                                                "【授权方式】本插件直接使用MoviePilot已存储的115网盘OAuth授权，"
-                                                "无需额外填写Cookie。请先前往 设置 → 存储 → 115网盘 完成扫码登录。"
-                                                "【目录填写】填写115云盘内的绝对路径，如 /待整理 或 /离线下载/待处理。"
-                                                "【工作流程】插件定时轮询115离线任务 → 发现完成任务 → "
-                                                "自动识别媒体信息并重命名 → 失败时将整个任务文件夹移入整理失败目录（保持文件完整）。"
+                                                "【授权方式】支持两种授权：MP OAuth（共用MoviePilot的115授权，推荐）和手动Cookie（自行填写Cookie字符串）。"
+                                                "MP OAuth请先前往 设置→存储→115网盘 完成扫码登录。"
+                                                "【目录选择】可在数据页可视化浏览115目录并一键设置下载/失败目录。"
+                                                "【工作流程】插件定时轮询115离线任务→发现完成任务→自动识别媒体信息并重命名→失败时将整个任务文件夹移入整理失败目录。"
                                             )
                                         }
                                     }
@@ -330,6 +468,8 @@ class Transfer115(_PluginBase):
         ], {
             "enabled": False,
             "notify_enabled": False,
+            "auth_mode": "mp_oauth",
+            "cookie": "",
             "onlyonce": False,
             "download_path": "",
             "fail_path": "",
@@ -339,99 +479,379 @@ class Transfer115(_PluginBase):
         }
 
     def get_page(self) -> List[dict]:
-        # Show live 115 authorization status at the top
-        oper = self._get_u115_oper()
-        if oper:
-            status_component = {
-                "component": "VAlert",
-                "props": {
-                    "type": "success",
-                    "variant": "tonal",
-                    "text": "✅ 115网盘已授权（使用MoviePilot存储配置）"
+        # SECTION A: Auth status
+        if self._auth_mode == "cookie":
+            if not self._cookie:
+                status_component = {
+                    "component": "VAlert",
+                    "props": {
+                        "type": "error",
+                        "variant": "tonal",
+                        "text": "❌ Cookie模式：未配置Cookie，请在设置页填写Cookie"
+                    }
                 }
-            }
-        else:
-            status_component = {
-                "component": "VAlert",
-                "props": {
-                    "type": "error",
-                    "variant": "tonal",
-                    "text": "❌ 115网盘未授权，请前往 设置 → 存储 → 115网盘 完成扫码登录"
+            else:
+                oper = self._get_cookie_oper()
+                if oper:
+                    status_component = {
+                        "component": "VAlert",
+                        "props": {
+                            "type": "success",
+                            "variant": "tonal",
+                            "text": "✅ Cookie模式已配置（Cookie已填写）"
+                        }
+                    }
+                else:
+                    status_component = {
+                        "component": "VAlert",
+                        "props": {
+                            "type": "error",
+                            "variant": "tonal",
+                            "text": "❌ Cookie模式：Cookie初始化失败，请检查p115client是否安装"
+                        }
+                    }
+        else:  # mp_oauth
+            oper = self._get_u115_oper()
+            if oper:
+                status_component = {
+                    "component": "VAlert",
+                    "props": {
+                        "type": "success",
+                        "variant": "tonal",
+                        "text": "✅ MP OAuth模式已授权（使用MoviePilot存储配置）"
+                    }
                 }
-            }
+            else:
+                status_component = {
+                    "component": "VAlert",
+                    "props": {
+                        "type": "error",
+                        "variant": "tonal",
+                        "text": "❌ MP OAuth模式：115网盘未授权，请前往 设置→存储→115网盘 完成扫码登录"
+                    }
+                }
 
-        records = self.get_data("task_records") or []
-        if not records:
-            return [
-                status_component,
+        # SECTION B: Current config display
+        config_section = {
+            "component": "VList",
+            "props": {"lines": "two", "density": "compact"},
+            "content": [
                 {
-                    "component": "div",
-                    "text": "暂无任务记录",
-                    "props": {"class": "text-center pa-4"}
+                    "component": "VListItem",
+                    "props": {"density": "compact"},
+                    "content": [
+                        {
+                            "component": "VListItemTitle",
+                            "text": f"下载目录: {self._download_path or '（未设置）'}"
+                        },
+                        {
+                            "component": "VListItemSubtitle",
+                            "content": [
+                                {
+                                    "component": "VBtn",
+                                    "props": {
+                                        "size": "x-small",
+                                        "variant": "tonal",
+                                        "color": "warning"
+                                    },
+                                    "text": "清空",
+                                    "events": {
+                                        "click": {
+                                            "api": "plugin/Transfer115/set_path",
+                                            "method": "post",
+                                            "params": {"field": "download_path", "path": "/"}
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "component": "VListItem",
+                    "props": {"density": "compact"},
+                    "content": [
+                        {
+                            "component": "VListItemTitle",
+                            "text": f"失败目录: {self._fail_path or '（未设置）'}"
+                        },
+                        {
+                            "component": "VListItemSubtitle",
+                            "content": [
+                                {
+                                    "component": "VBtn",
+                                    "props": {
+                                        "size": "x-small",
+                                        "variant": "tonal",
+                                        "color": "warning"
+                                    },
+                                    "text": "清空",
+                                    "events": {
+                                        "click": {
+                                            "api": "plugin/Transfer115/set_path",
+                                            "method": "post",
+                                            "params": {"field": "fail_path", "path": "/"}
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    ]
                 }
             ]
+        }
 
-        # Show most recent 50 entries, newest first
-        records = list(reversed(records[-50:]))
-        rows = []
-        for entry in records:
-            status = entry.get("status", "")
-            if status == "整理成功":
-                status_text = "✅ 整理成功"
-            elif status == "整理失败":
-                status_text = "❌ 整理失败"
-            else:
-                status_text = "⏳ 下载中"
-            rows.append({
-                "component": "VListItem",
-                "props": {"density": "compact"},
-                "content": [
-                    {
-                        "component": "VListItemTitle",
-                        "props": {"class": "text-caption text-truncate"},
-                        "text": entry.get("name", "")
-                    },
-                    {
-                        "component": "VListItemSubtitle",
-                        "text": f"{entry.get('time', '')}  {status_text}"
+        # SECTION C: Directory browser
+        browse_path = self.get_data("browse_path") or "/"
+
+        # Compute parent path
+        if browse_path == "/":
+            parent_path = None
+        else:
+            parts = browse_path.rstrip("/").rsplit("/", 1)
+            parent_path = parts[0] + "/" if parts[0] else "/"
+
+        # Try to list dirs
+        dir_items = []
+        dir_error = None
+        try:
+            from app.chain.storage import StorageChain
+            from app.schemas import FileItem
+            bp = browse_path if browse_path.endswith("/") else browse_path + "/"
+            fileitem = FileItem(storage="u115", path=bp, type="dir")
+            listed = StorageChain().list_files(fileitem) or []
+            dir_items = [i for i in listed if i.type == "dir"]
+        except Exception as e:
+            dir_error = str(e)
+
+        # Build browser nav buttons
+        browser_nav_content = []
+        browser_nav_content.append({
+            "component": "span",
+            "text": f"当前路径: {browse_path}",
+            "props": {"class": "text-body-2 mr-2"}
+        })
+        if parent_path is not None:
+            browser_nav_content.append({
+                "component": "VBtn",
+                "props": {"size": "x-small", "variant": "tonal", "color": "secondary", "class": "mr-1"},
+                "text": "返回上级",
+                "events": {
+                    "click": {
+                        "api": "plugin/Transfer115/nav_dir",
+                        "method": "post",
+                        "params": {"path": parent_path}
                     }
-                ]
+                }
+            })
+        browser_nav_content.append({
+            "component": "VBtn",
+            "props": {"size": "x-small", "variant": "tonal", "color": "secondary"},
+            "text": "刷新",
+            "events": {
+                "click": {
+                    "api": "plugin/Transfer115/nav_dir",
+                    "method": "post",
+                    "params": {"path": browse_path}
+                }
+            }
+        })
+
+        browser_header = {
+            "component": "VRow",
+            "props": {"class": "align-center mb-1"},
+            "content": [
+                {
+                    "component": "VCol",
+                    "props": {"cols": 12},
+                    "content": browser_nav_content
+                }
+            ]
+        }
+
+        browser_items_content = []
+        if dir_error:
+            browser_items_content.append({
+                "component": "VAlert",
+                "props": {
+                    "type": "warning",
+                    "variant": "tonal",
+                    "density": "compact",
+                    "text": f"列出目录失败: {dir_error}"
+                }
+            })
+        elif not dir_items:
+            browser_items_content.append({
+                "component": "div",
+                "text": "此目录下无子目录",
+                "props": {"class": "text-caption text-center pa-2"}
+            })
+        else:
+            dir_rows = []
+            for d in dir_items:
+                dir_rows.append({
+                    "component": "VListItem",
+                    "props": {"density": "compact"},
+                    "content": [
+                        {
+                            "component": "VListItemTitle",
+                            "props": {"class": "text-body-2"},
+                            "text": d.name
+                        },
+                        {
+                            "component": "VListItemSubtitle",
+                            "content": [
+                                {
+                                    "component": "VBtn",
+                                    "props": {
+                                        "size": "x-small",
+                                        "variant": "tonal",
+                                        "color": "primary",
+                                        "class": "mr-1"
+                                    },
+                                    "text": "设为下载目录",
+                                    "events": {
+                                        "click": {
+                                            "api": "plugin/Transfer115/set_path",
+                                            "method": "post",
+                                            "params": {"field": "download_path", "path": d.path}
+                                        }
+                                    }
+                                },
+                                {
+                                    "component": "VBtn",
+                                    "props": {
+                                        "size": "x-small",
+                                        "variant": "tonal",
+                                        "color": "warning",
+                                        "class": "mr-1"
+                                    },
+                                    "text": "设为失败目录",
+                                    "events": {
+                                        "click": {
+                                            "api": "plugin/Transfer115/set_path",
+                                            "method": "post",
+                                            "params": {"field": "fail_path", "path": d.path}
+                                        }
+                                    }
+                                },
+                                {
+                                    "component": "VBtn",
+                                    "props": {
+                                        "size": "x-small",
+                                        "variant": "tonal",
+                                        "color": "secondary"
+                                    },
+                                    "text": "进入",
+                                    "events": {
+                                        "click": {
+                                            "api": "plugin/Transfer115/nav_dir",
+                                            "method": "post",
+                                            "params": {"path": d.path}
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                })
+            browser_items_content.append({
+                "component": "VList",
+                "props": {"lines": "two", "density": "compact"},
+                "content": dir_rows
             })
 
-        return [
-            status_component,
-            {
+        browser_section = {
+            "component": "VCard",
+            "props": {"variant": "outlined", "class": "mb-2"},
+            "content": [
+                {
+                    "component": "VCardTitle",
+                    "props": {"class": "text-body-1"},
+                    "text": "目录浏览器"
+                },
+                {
+                    "component": "VCardText",
+                    "content": [browser_header] + browser_items_content
+                }
+            ]
+        }
+
+        # SECTION D: Task records
+        records = self.get_data("task_records") or []
+        if not records:
+            task_section = {
+                "component": "div",
+                "text": "暂无任务记录",
+                "props": {"class": "text-center pa-4"}
+            }
+        else:
+            records = list(reversed(records[-50:]))
+            rows = []
+            for entry in records:
+                status = entry.get("status", "")
+                if status == "整理成功":
+                    status_text = "✅ 整理成功"
+                elif status == "整理失败":
+                    status_text = "❌ 整理失败"
+                else:
+                    status_text = "⏳ 下载中"
+                rows.append({
+                    "component": "VListItem",
+                    "props": {"density": "compact"},
+                    "content": [
+                        {
+                            "component": "VListItemTitle",
+                            "props": {"class": "text-caption text-truncate"},
+                            "text": entry.get("name", "")
+                        },
+                        {
+                            "component": "VListItemSubtitle",
+                            "text": f"{entry.get('time', '')}  {status_text}"
+                        }
+                    ]
+                })
+            task_section = {
                 "component": "VList",
                 "props": {"lines": "two"},
                 "content": rows
-            },
-            {
-                "component": "VRow",
-                "props": {"class": "mt-2"},
-                "content": [
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12, "class": "text-center"},
-                        "content": [
-                            {
-                                "component": "VBtn",
-                                "props": {
-                                    "color": "primary",
-                                    "variant": "tonal",
-                                    "size": "small"
-                                },
-                                "text": "刷新任务状态",
-                                "events": {
-                                    "click": {
-                                        "api": "plugin/Transfer115/refresh_tasks",
-                                        "method": "get"
-                                    }
+            }
+
+        # SECTION E: Refresh button
+        refresh_section = {
+            "component": "VRow",
+            "props": {"class": "mt-2"},
+            "content": [
+                {
+                    "component": "VCol",
+                    "props": {"cols": 12, "class": "text-center"},
+                    "content": [
+                        {
+                            "component": "VBtn",
+                            "props": {
+                                "color": "primary",
+                                "variant": "tonal",
+                                "size": "small"
+                            },
+                            "text": "刷新任务状态",
+                            "events": {
+                                "click": {
+                                    "api": "plugin/Transfer115/refresh_tasks",
+                                    "method": "get"
                                 }
                             }
-                        ]
-                    }
-                ]
-            }
+                        }
+                    ]
+                }
+            ]
+        }
+
+        return [
+            status_component,
+            config_section,
+            browser_section,
+            task_section,
+            refresh_section
         ]
 
     def get_service(self) -> List[Dict[str, Any]]:
@@ -452,12 +872,15 @@ class Transfer115(_PluginBase):
 
     def __check_and_organize(self):
         """轮询115离线任务，对已完成的任务执行整理"""
-        oper = self._get_u115_oper()
+        oper = self._get_oper()
         if not oper:
             logger.warning("Transfer115: 115未授权，跳过任务检查")
             return
         try:
-            resp = oper._request_api("GET", "/open/offline/get_task_list", params={"page": 1})
+            if self._auth_mode == "cookie":
+                resp = oper.offline_list({"page": 1})
+            else:
+                resp = oper._request_api("GET", "/open/offline/get_task_list", params={"page": 1})
             tasks = (resp or {}).get("data", {}).get("tasks", [])
             # processed_tasks: list of task IDs that completed successfully and need no
             # further action.
@@ -544,13 +967,17 @@ class Transfer115(_PluginBase):
 
             if file_id:
                 try:
-                    resp = oper._request_api(
-                        "GET",
-                        "/open/ufile/files",
-                        "data",
-                        params={"cid": int(file_id), "limit": 1000}
-                    )
-                    file_list = (resp or [])
+                    if self._auth_mode == "cookie":
+                        resp = oper.fs_files({"cid": int(file_id), "limit": 1000})
+                        file_list = resp.get("data", [])
+                    else:
+                        resp = oper._request_api(
+                            "GET",
+                            "/open/ufile/files",
+                            "data",
+                            params={"cid": int(file_id), "limit": 1000}
+                        )
+                        file_list = (resp or [])
                 except Exception as e:
                     logger.warning(f"Transfer115: 获取任务文件列表失败: {e}")
                     file_list = []
@@ -577,14 +1004,6 @@ class Transfer115(_PluginBase):
 
                 task_folder_path = self._download_path.rstrip("/") + "/" + task_name
                 cloud_path = Path(task_folder_path) / fname
-                # NOTE: cloud_path is constructed by concatenating _download_path and
-                # task_name. This assumes 115 places completed task files in a subfolder
-                # named exactly task.name under download_path. If the task name contains
-                # characters that 115 normalises (e.g. full-width punctuation), or if the
-                # account's default save location differs from _download_path, the
-                # constructed path will not match the real cloud location. Verifying
-                # the path against the actual 115 folder hierarchy is not feasible
-                # through MoviePilot's chain.transfer interface.
                 result = self.chain.transfer(
                     path=cloud_path,
                     meta=meta,
@@ -606,9 +1025,6 @@ class Transfer115(_PluginBase):
                     any_failure = True
 
             if any_failure:
-                # Do NOT move the folder here. Folder moves happen only at retry exhaustion
-                # in __check_and_organize, to avoid double-move errors when the same task
-                # is retried multiple times.
                 logger.warning(f"Transfer115: 任务 '{task_name}' 部分文件整理失败，等待重试")
                 if self._notify_enabled:
                     self.post_message(
@@ -617,8 +1033,6 @@ class Transfer115(_PluginBase):
                         text=f"❌ 任务: {task_name}\n部分文件整理失败，将在下次检查时重试"
                     )
 
-            # organized_count > 0 ensures a task with no video files is not recorded
-            # as a spurious success when any_failure is also False.
             return organized_count > 0 and not any_failure
 
         except Exception as e:
@@ -631,6 +1045,27 @@ class Transfer115(_PluginBase):
                 )
             return False
 
+    def _get_folder_id_by_path_cookie(self, path: str, oper) -> Optional[int]:
+        """Walk path to get folder id for cookie mode."""
+        try:
+            parts = [p for p in path.strip("/").split("/") if p]
+            current_id = 0
+            for part in parts:
+                resp = oper.fs_files({"cid": current_id, "limit": 1000})
+                items = resp.get("data", [])
+                found = None
+                for item in items:
+                    if item.get("n") == part and item.get("fid") is None:
+                        found = item.get("cid") or item.get("fid")
+                        break
+                if found is None:
+                    return None
+                current_id = int(found)
+            return current_id
+        except Exception as e:
+            logger.warning(f"Transfer115: cookie模式获取目录ID失败: {e}")
+            return None
+
     def __move_folder_to_fail(self, task: dict, task_name: str, oper):
         """将整个任务文件夹移动到整理失败目录"""
         try:
@@ -639,51 +1074,70 @@ class Transfer115(_PluginBase):
                 logger.warning(f"Transfer115: 无法获取任务文件夹ID，跳过移动: {task_name}")
                 return
 
-            # Get or create fail folder using oper.get_folder
-            try:
-                fail_item = oper.get_folder(Path(self._fail_path))
-            except Exception as e:
-                logger.warning(f"Transfer115: 获取失败目录失败: {e}")
-                fail_item = None
-
-            if not fail_item:
-                logger.warning(f"Transfer115: 无法获取失败目录: {self._fail_path}")
+            if self._auth_mode == "cookie":
+                # Cookie mode: use p115client fs_move
+                fail_folder_id = self._get_folder_id_by_path_cookie(self._fail_path, oper)
+                if fail_folder_id is None:
+                    logger.warning(f"Transfer115: cookie模式无法找到失败目录: {self._fail_path}")
+                    if self._notify_enabled:
+                        self.post_message(
+                            mtype=NotificationType.Manual,
+                            title="115整理失败",
+                            text=f"❌ 任务: {task_name}\n整理失败，请手动移至: {self._fail_path}"
+                        )
+                    return
+                oper.fs_move([int(folder_id)], pid=fail_folder_id)
+                logger.info(f"Transfer115: 已将失败任务 '{task_name}' 的文件夹移至: {self._fail_path}")
                 if self._notify_enabled:
                     self.post_message(
                         mtype=NotificationType.Manual,
-                        title="115整理失败",
-                        text=f"❌ 任务: {task_name}\n整理失败，请手动移至: {self._fail_path}"
+                        title="115整理失败-已归档",
+                        text=f"❌ 任务: {task_name}\n文件夹已移至失败目录: {self._fail_path}"
                     )
-                return
+            else:
+                # MP OAuth mode: use U115Pan helpers
+                try:
+                    fail_item = oper.get_folder(Path(self._fail_path))
+                except Exception as e:
+                    logger.warning(f"Transfer115: 获取失败目录失败: {e}")
+                    fail_item = None
 
-            # Get the task folder item using its file_id
-            try:
-                task_item = oper.get_item(Path(
-                    self._download_path.rstrip("/") + "/" + task_name
-                ))
-            except Exception as e:
-                logger.warning(f"Transfer115: 获取任务文件夹失败: {e}")
-                task_item = None
+                if not fail_item:
+                    logger.warning(f"Transfer115: 无法获取失败目录: {self._fail_path}")
+                    if self._notify_enabled:
+                        self.post_message(
+                            mtype=NotificationType.Manual,
+                            title="115整理失败",
+                            text=f"❌ 任务: {task_name}\n整理失败，请手动移至: {self._fail_path}"
+                        )
+                    return
 
-            if not task_item:
-                logger.warning(f"Transfer115: 无法获取任务文件夹，跳过移动: {task_name}")
+                try:
+                    task_item = oper.get_item(Path(
+                        self._download_path.rstrip("/") + "/" + task_name
+                    ))
+                except Exception as e:
+                    logger.warning(f"Transfer115: 获取任务文件夹失败: {e}")
+                    task_item = None
+
+                if not task_item:
+                    logger.warning(f"Transfer115: 无法获取任务文件夹，跳过移动: {task_name}")
+                    if self._notify_enabled:
+                        self.post_message(
+                            mtype=NotificationType.Manual,
+                            title="115整理失败",
+                            text=f"❌ 任务: {task_name}\n整理失败，请手动移至: {self._fail_path}"
+                        )
+                    return
+
+                oper.move(task_item, Path(self._fail_path), task_item.name)
+                logger.info(f"Transfer115: 已将失败任务 '{task_name}' 的文件夹移至: {self._fail_path}")
                 if self._notify_enabled:
                     self.post_message(
                         mtype=NotificationType.Manual,
-                        title="115整理失败",
-                        text=f"❌ 任务: {task_name}\n整理失败，请手动移至: {self._fail_path}"
+                        title="115整理失败-已归档",
+                        text=f"❌ 任务: {task_name}\n文件夹已移至失败目录: {self._fail_path}"
                     )
-                return
-
-            # Move using oper.move
-            oper.move(task_item, Path(self._fail_path), task_item.name)
-            logger.info(f"Transfer115: 已将失败任务 '{task_name}' 的文件夹移至: {self._fail_path}")
-            if self._notify_enabled:
-                self.post_message(
-                    mtype=NotificationType.Manual,
-                    title="115整理失败-已归档",
-                    text=f"❌ 任务: {task_name}\n文件夹已移至失败目录: {self._fail_path}"
-                )
 
         except Exception as e:
             logger.error(f"Transfer115: 移动失败目录异常 ({task_name}): {e}")
