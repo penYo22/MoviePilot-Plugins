@@ -160,14 +160,14 @@ class Transfer115(_PluginBase):
             {
                 "path": "/set_path",
                 "endpoint": self.api_set_path,
-                "methods": ["POST"],
+                "methods": ["GET"],
                 "auth": "bear",
                 "summary": "设置目录配置"
             },
             {
                 "path": "/nav_dir",
                 "endpoint": self.api_nav_dir,
-                "methods": ["POST"],
+                "methods": ["GET"],
                 "auth": "bear",
                 "summary": "导航到目录"
             }
@@ -590,7 +590,7 @@ class Transfer115(_PluginBase):
                                     "events": {
                                         "click": {
                                             "api": "plugin/Transfer115/set_path",
-                                            "method": "post",
+                                            "method": "get",
                                             "params": {"field": "download_path", "path": "/"}
                                         }
                                     }
@@ -621,7 +621,7 @@ class Transfer115(_PluginBase):
                                     "events": {
                                         "click": {
                                             "api": "plugin/Transfer115/set_path",
-                                            "method": "post",
+                                            "method": "get",
                                             "params": {"field": "fail_path", "path": "/"}
                                         }
                                     }
@@ -660,7 +660,7 @@ class Transfer115(_PluginBase):
                     "events": {
                         "click": {
                             "api": "plugin/Transfer115/nav_dir",
-                            "method": "post",
+                            "method": "get",
                             "params": {"path": parent_path}
                         }
                     }
@@ -672,7 +672,7 @@ class Transfer115(_PluginBase):
                 "events": {
                     "click": {
                         "api": "plugin/Transfer115/nav_dir",
-                        "method": "post",
+                        "method": "get",
                         "params": {"path": browse_path}
                     }
                 }
@@ -743,7 +743,7 @@ class Transfer115(_PluginBase):
                     "events": {
                         "click": {
                             "api": "plugin/Transfer115/nav_dir",
-                            "method": "post",
+                            "method": "get",
                             "params": {"path": parent_path}
                         }
                     }
@@ -755,7 +755,7 @@ class Transfer115(_PluginBase):
                 "events": {
                     "click": {
                         "api": "plugin/Transfer115/nav_dir",
-                        "method": "post",
+                        "method": "get",
                         "params": {"path": browse_path}
                     }
                 }
@@ -817,7 +817,7 @@ class Transfer115(_PluginBase):
                                         "events": {
                                             "click": {
                                                 "api": "plugin/Transfer115/set_path",
-                                                "method": "post",
+                                                "method": "get",
                                                 "params": {"field": "download_path", "path": d.path}
                                             }
                                         }
@@ -834,7 +834,7 @@ class Transfer115(_PluginBase):
                                         "events": {
                                             "click": {
                                                 "api": "plugin/Transfer115/set_path",
-                                                "method": "post",
+                                                "method": "get",
                                                 "params": {"field": "fail_path", "path": d.path}
                                             }
                                         }
@@ -850,7 +850,7 @@ class Transfer115(_PluginBase):
                                         "events": {
                                             "click": {
                                                 "api": "plugin/Transfer115/nav_dir",
-                                                "method": "post",
+                                                "method": "get",
                                                 "params": {"path": d.path}
                                             }
                                         }
