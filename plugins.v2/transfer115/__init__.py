@@ -287,6 +287,7 @@ class Transfer115(_PluginBase):
         self.del_data("task_records")
         self.del_data("processed_tasks")
         self.del_data("failed_tasks")
+        self.del_data("download_done_tasks")
         logger.info("Transfer115: 插件任务记录已清空")
         return {"code": 0, "msg": "任务记录已清空"}
 
@@ -1058,6 +1059,10 @@ class Transfer115(_PluginBase):
             # skipped, preventing a broken task from blocking the poll loop forever.
             _MAX_TASK_RETRIES = 3
             failed_tasks: dict = self.get_data("failed_tasks") or {}
+            # download_done_tasks: set of task IDs that have been marked "下载完成" but
+            # not yet organized. Organizing is deferred to the next poll cycle so that
+            # the "下载完成" status is visible to the user for at least one interval.
+            download_done: set = set(self.get_data("download_done_tasks") or [])
             changed = False
 
             for task in tasks:
@@ -1100,11 +1105,23 @@ class Transfer115(_PluginBase):
                     )
                     continue
 
-                # 已完成且未处理 — 先标记下载完成，再整理
-                logger.info(f"Transfer115: 发现已完成任务: {task_name}")
-                self.__upsert_task_record(task_name, "下载完成")
+                # 两阶段处理：
+                # 第一次轮询到 status=2 时只写"下载完成"，等下次轮询再整理，
+                # 确保用户至少能看到一个轮询周期的"下载完成"状态。
+                if task_id not in download_done:
+                    logger.info(f"Transfer115: 任务下载完成，等待下次轮询整理: {task_name}")
+                    self.__upsert_task_record(task_name, "下载完成")
+                    download_done.add(task_id)
+                    self.save_data("download_done_tasks", list(download_done))
+                    continue
+
+                # 已经过一个轮询周期，现在执行整理
+                logger.info(f"Transfer115: 开始整理任务: {task_name}")
                 success = self.__organize_task(task, task_name, oper)
                 changed = True
+
+                # 整理完成后从 download_done 移除
+                download_done.discard(task_id)
 
                 if success:
                     # Full success: permanently mark as processed and remove from
@@ -1139,6 +1156,7 @@ class Transfer115(_PluginBase):
             if changed:
                 self.save_data("processed_tasks", processed)
                 self.save_data("failed_tasks", failed_tasks)
+                self.save_data("download_done_tasks", list(download_done))
 
         except Exception as e:
             logger.error(f"Transfer115: 任务检查异常: {e}")
