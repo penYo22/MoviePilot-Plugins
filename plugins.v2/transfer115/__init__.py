@@ -22,7 +22,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.2"
+    plugin_version = "3.3"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -43,6 +43,7 @@ class Transfer115(_PluginBase):
     _transfer_type: str = "move"
     _auth_mode: str = "mp_oauth"
     _cookie: str = ""
+    _library_path: str = ""
 
     # 支持的视频文件扩展名
     _video_extensions = (".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov")
@@ -80,6 +81,7 @@ class Transfer115(_PluginBase):
         self._cookie = config.get("cookie", "").strip()
         self._download_path = config.get("download_path", "").strip()
         self._fail_path = config.get("fail_path", "").strip()
+        self._library_path = config.get("library_path", "").strip()
         self._poll_interval = int(config.get("poll_interval", 5) or 5)
         self._transfer_type = config.get("transfer_type", "move")
 
@@ -144,6 +146,7 @@ class Transfer115(_PluginBase):
                 "cookie": self._cookie,
                 "download_path": self._download_path,
                 "fail_path": self._fail_path,
+                "library_path": self._library_path,
                 "poll_interval": self._poll_interval,
                 "transfer_type": self._transfer_type,
                 "onlyonce": False,
@@ -186,6 +189,13 @@ class Transfer115(_PluginBase):
                 "methods": ["GET"],
                 "auth": "bear",
                 "summary": "导航到目录"
+            },
+            {
+                "path": "/clear_logs",
+                "endpoint": self.api_clear_logs,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "清空插件任务记录"
             }
         ]
 
@@ -221,23 +231,17 @@ class Transfer115(_PluginBase):
 
     def api_set_path(self, field: str = "", path: str = "/") -> dict:
         """设置目录配置"""
-        if field not in ("download_path", "fail_path"):
+        if field not in ("download_path", "fail_path", "library_path"):
             return {"code": 1, "msg": "无效字段"}
         clean_path = path.rstrip("/") if path != "/" else "/"
-        # Read current persisted config to avoid overwriting concurrent changes.
-        # get_config() is not available in _PluginBase; we fall back to a snapshot
-        # from instance state but add setdefault-style merging so that if two
-        # requests race, the last write wins only for the field it explicitly sets.
-        # NOTE: a true read-modify-write race is still possible here because
-        # update_config has no atomic merge operation; this is a framework limitation.
         conf = {
             "enabled": self._enabled,
             "notify_enabled": self._notify_enabled,
             "auth_mode": self._auth_mode,
-            # Preserve the stored cookie without exposing self._cookie in new code
             "cookie": self._cookie,
             "download_path": self._download_path,
             "fail_path": self._fail_path,
+            "library_path": self._library_path,
             "poll_interval": self._poll_interval,
             "transfer_type": self._transfer_type,
             "onlyonce": False,
@@ -247,14 +251,24 @@ class Transfer115(_PluginBase):
         self.update_config(conf)
         if field == "download_path":
             self._download_path = clean_path
-        else:
+        elif field == "fail_path":
             self._fail_path = clean_path
+        else:
+            self._library_path = clean_path
         return {"code": 0, "msg": f"已设置 {field} 为 {clean_path}"}
 
     def api_nav_dir(self, path: str = "/") -> dict:
         """导航到目录"""
         self.save_data("browse_path", path)
         return {"code": 0}
+
+    def api_clear_logs(self) -> dict:
+        """清空插件任务记录及处理状态"""
+        self.del_data("task_records")
+        self.del_data("processed_tasks")
+        self.del_data("failed_tasks")
+        logger.info("Transfer115: 插件任务记录已清空")
+        return {"code": 0, "msg": "任务记录已清空"}
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
@@ -360,7 +374,7 @@ class Transfer115(_PluginBase):
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -374,7 +388,21 @@ class Transfer115(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "library_path",
+                                            "label": "媒体库存放路径",
+                                            "placeholder": "如 /媒体库 （整理成功后存入此目录，留空则使用MP目录配置）"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -520,6 +548,7 @@ class Transfer115(_PluginBase):
             "cookie": "",
             "onlyonce": False,
             "download_path": "",
+            "library_path": "",
             "fail_path": "",
             "poll_interval": 5,
             "transfer_type": "move",
@@ -641,6 +670,37 @@ class Transfer115(_PluginBase):
                                             "api": "plugin/Transfer115/set_path",
                                             "method": "get",
                                             "params": {"field": "fail_path", "path": "/"}
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "component": "VListItem",
+                    "props": {"density": "compact"},
+                    "content": [
+                        {
+                            "component": "VListItemTitle",
+                            "text": f"媒体库目录: {self._library_path or '（未设置，使用MP目录配置）'}"
+                        },
+                        {
+                            "component": "VListItemSubtitle",
+                            "content": [
+                                {
+                                    "component": "VBtn",
+                                    "props": {
+                                        "size": "x-small",
+                                        "variant": "tonal",
+                                        "color": "warning"
+                                    },
+                                    "text": "清空",
+                                    "events": {
+                                        "click": {
+                                            "api": "plugin/Transfer115/set_path",
+                                            "method": "get",
+                                            "params": {"field": "library_path", "path": "/"}
                                         }
                                     }
                                 }
@@ -795,6 +855,23 @@ class Transfer115(_PluginBase):
                                         "props": {
                                             "size": "x-small",
                                             "variant": "tonal",
+                                            "color": "success",
+                                            "class": "mr-1"
+                                        },
+                                        "text": "设为媒体库",
+                                        "events": {
+                                            "click": {
+                                                "api": "plugin/Transfer115/set_path",
+                                                "method": "get",
+                                                "params": {"field": "library_path", "path": d.path}
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "component": "VBtn",
+                                        "props": {
+                                            "size": "x-small",
+                                            "variant": "tonal",
                                             "color": "secondary"
                                         },
                                         "text": "进入",
@@ -892,6 +969,17 @@ class Transfer115(_PluginBase):
                             "events": {
                                 "click": {
                                     "api": "plugin/Transfer115/refresh_tasks",
+                                    "method": "get"
+                                }
+                            }
+                        },
+                        {
+                            "component": "VBtn",
+                            "props": {"color": "error", "variant": "tonal", "size": "small", "class": "ml-2"},
+                            "text": "清空任务记录",
+                            "events": {
+                                "click": {
+                                    "api": "plugin/Transfer115/clear_logs",
                                     "method": "get"
                                 }
                             }
@@ -1075,12 +1163,15 @@ class Transfer115(_PluginBase):
                 else:
                     task_folder_path = self._download_path.rstrip("/") + "/" + task_name
                     cloud_path = Path(task_folder_path) / fname
-                result = self.chain.transfer(
+                transfer_kwargs = dict(
                     path=cloud_path,
                     meta=meta,
                     mediainfo=mediainfo,
-                    transfer_type=self._transfer_type
+                    transfer_type=self._transfer_type,
                 )
+                if self._library_path:
+                    transfer_kwargs["target_path"] = Path(self._library_path)
+                result = self.chain.transfer(**transfer_kwargs)
 
                 if result:
                     organized_count += 1

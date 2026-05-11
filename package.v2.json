@@ -3,7 +3,7 @@
         "name": "115离线整理",
         "description": "⚠️ 未经测试，封号自理。使用MoviePilot已存储的115授权或自填Cookie，添加离线下载任务，完成后自动识别重命名，失败文件夹整体归档",
         "labels": "115,离线下载,云盘,媒体整理",
-        "version": "3.2",
+        "version": "3.3",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "penYo22",
         "level": 1,
@@ -12,7 +12,8 @@
             "v2.0": "使用MP OAuth授权替换Cookie模式",
             "v3.0": "双授权模式（MP OAuth + Cookie），可视化目录选择器",
             "v3.1": "修复：目录浏览器在Cookie模式/未启用时隐藏；修复set_path/nav_dir参数传递错误",
-            "v3.2": "修复：离线任务保存到指定目录（传递wp_path_id），修复整理时云盘路径构造错误"
+            "v3.2": "修复：离线任务保存到指定目录（传递wp_path_id），修复整理时云盘路径构造错误",
+            "v3.3": "新增媒体库存放路径配置；新增清空任务记录功能"
         }
     }
 }
