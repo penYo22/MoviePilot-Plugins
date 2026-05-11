@@ -366,7 +366,7 @@ class Transfer115(_PluginBase):
                     {"name": i.get("n", ""), "path": self._download_path.rstrip("/") + "/" + i.get("n", ""), "fileid": str(i.get("cid", ""))}
                     for i in items if i.get("fid") is None and i.get("n")
                 ]
-                if len(items) >= 200:
+                if len(folders) >= 200:
                     truncated = True
                     logger.warning(f"Transfer115: Cookie模式子文件夹列表已达上限200个，可能不完整")
             self.save_data("folder_list_cache", folders)
