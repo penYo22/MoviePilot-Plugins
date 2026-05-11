@@ -18,11 +18,11 @@ class Transfer115(_PluginBase):
     # 插件名称
     plugin_name = "115离线整理"
     # 插件描述
-    plugin_desc = "通过Cookie登录115网盘，添加离线下载任务，完成后自动识别重命名，失败文件夹整体归档"
+    plugin_desc = "使用MoviePilot已存储的115授权，添加离线下载任务，完成后自动识别重命名，失败文件夹整体归档"
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "1.0"
+    plugin_version = "2.0"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -37,15 +37,24 @@ class Transfer115(_PluginBase):
     # 私有属性
     _enabled: bool = False
     _notify_enabled: bool = False
-    _cookie: str = ""
     _download_path: str = ""
     _fail_path: str = ""
     _poll_interval: int = 5
     _transfer_type: str = "move"
-    _client = None
 
     # 支持的视频文件扩展名
     _video_extensions = (".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov")
+
+    def _get_u115_oper(self):
+        """Get the live U115Pan singleton — already authenticated via MP's OAuth token."""
+        try:
+            from app.modules.filemanager.storages.u115 import U115Pan
+            oper = U115Pan()
+            if oper.check():  # check() returns True if access_token is present
+                return oper
+        except Exception as e:
+            logger.warning(f"Transfer115: 获取115存储实例失败: {e}")
+        return None
 
     def init_plugin(self, config: dict = None):
         if not config:
@@ -53,41 +62,35 @@ class Transfer115(_PluginBase):
 
         self._enabled = config.get("enabled", False)
         self._notify_enabled = config.get("notify_enabled", False)
-        self._cookie = config.get("cookie", "").strip()
         self._download_path = config.get("download_path", "").strip()
         self._fail_path = config.get("fail_path", "").strip()
         self._poll_interval = int(config.get("poll_interval", 5) or 5)
         self._transfer_type = config.get("transfer_type", "move")
 
-        # 初始化 P115Client
-        self._client = None
-        if self._cookie:
-            try:
-                from p115client import P115Client
-                self._client = P115Client(cookies=self._cookie)
-                logger.info("Transfer115: 115客户端初始化成功")
-            except Exception as e:
-                logger.error(f"Transfer115: 初始化115客户端失败: {e}")
-                self._client = None
-
         # 处理立即提交的链接
         link_input = config.get("link_input", "").strip()
-        if link_input and self._client:
+        if link_input:
             lines = [l.strip() for l in link_input.splitlines() if l.strip()]
             if lines:
-                try:
-                    self._client.offline_add_urls(lines)
-                    logger.info(f"Transfer115: 添加离线任务成功，共 {len(lines)} 条")
-                    if self._notify_enabled:
-                        self.post_message(
-                            mtype=NotificationType.Organize,
-                            title="115离线任务已提交",
-                            text=f"已提交 {len(lines)} 条离线下载任务"
+                oper = self._get_u115_oper()
+                if oper:
+                    try:
+                        oper._request_api(
+                            "POST",
+                            "/open/offline/add_task_urls",
+                            data={"urls": "\n".join(lines)}
                         )
-                except Exception as e:
-                    logger.error(f"Transfer115: 添加离线任务失败: {e}")
-        elif link_input and not self._client:
-            logger.warning("Transfer115: 链接已填写但115客户端未初始化（请检查Cookie配置）")
+                        logger.info(f"Transfer115: 添加离线任务成功，共 {len(lines)} 条")
+                        if self._notify_enabled:
+                            self.post_message(
+                                mtype=NotificationType.Organize,
+                                title="115离线任务已提交",
+                                text=f"已提交 {len(lines)} 条离线下载任务"
+                            )
+                    except Exception as e:
+                        logger.error(f"Transfer115: 添加离线任务失败: {e}")
+                else:
+                    logger.warning("Transfer115: 链接已填写但115未授权（请前往 设置 → 存储 → 115网盘 完成扫码登录）")
 
         # 处理立即执行
         onlyonce = config.get("onlyonce", False)
@@ -96,13 +99,9 @@ class Transfer115(_PluginBase):
 
         # 清空 link_input 和 onlyonce
         if link_input or onlyonce:
-            # NOTE: MoviePilot stores plugin config as plaintext JSON. The cookie is re-written
-            # here only when link_input or onlyonce needs to be cleared; it cannot be encrypted
-            # at this layer. Users should treat their plugin config storage as a sensitive file.
             self.update_config({
                 "enabled": self._enabled,
                 "notify_enabled": self._notify_enabled,
-                "cookie": self._cookie,
                 "download_path": self._download_path,
                 "fail_path": self._fail_path,
                 "poll_interval": self._poll_interval,
@@ -133,8 +132,9 @@ class Transfer115(_PluginBase):
         """手动触发任务检查"""
         if not self._enabled:
             return {"code": 1, "msg": "插件未启用"}
-        if not self._client:
-            return {"code": 1, "msg": "115客户端未初始化，请检查Cookie配置"}
+        oper = self._get_u115_oper()
+        if not oper:
+            return {"code": 1, "msg": "115网盘未授权，请前往 设置 → 存储 → 115网盘 完成扫码登录"}
         self.__check_and_organize()
         return {"code": 0, "msg": "任务检查已触发"}
 
@@ -143,7 +143,7 @@ class Transfer115(_PluginBase):
             {
                 "component": "VForm",
                 "content": [
-                    # 行1：开关区
+                    # 行1：开关区 + 授权状态提示
                     {
                         "component": "VRow",
                         "content": [
@@ -178,44 +178,19 @@ class Transfer115(_PluginBase):
                                 "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
-                                        "component": "VSwitch",
+                                        "component": "VAlert",
                                         "props": {
-                                            "model": "onlyonce",
-                                            "label": "立即检查一次",
-                                            "hint": "保存后立即执行一次任务检查，执行后自动关闭",
-                                            "persistent-hint": True
+                                            "type": "info",
+                                            "variant": "tonal",
+                                            "density": "compact",
+                                            "text": "115授权状态请在下方数据页查看"
                                         }
                                     }
                                 ]
                             }
                         ]
                     },
-                    # 行2：115 Cookie
-                    {
-                        "component": "VRow",
-                        "content": [
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 12},
-                                "content": [
-                                    {
-                                        "component": "VTextField",
-                                        "props": {
-                                            "model": "cookie",
-                                            "label": "115 Cookie",
-                                            "placeholder": "UID=...;CID=...;SEID=...",
-                                            "hint": "在115网盘网页版按F12打开开发者工具，Application > Cookies中复制所有cookie值",
-                                            "persistent-hint": True,
-                                            # type="password" masks the value on-screen so the cookie is not
-                                            # visible in plain text in the plugin configuration UI.
-                                            "type": "password"
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    # 行3：目录配置
+                    # 行2：目录配置
                     {
                         "component": "VRow",
                         "content": [
@@ -249,7 +224,7 @@ class Transfer115(_PluginBase):
                             }
                         ]
                     },
-                    # 行4：参数配置
+                    # 行3：参数配置（含立即检查一次开关）
                     {
                         "component": "VRow",
                         "content": [
@@ -283,10 +258,25 @@ class Transfer115(_PluginBase):
                                         }
                                     }
                                 ]
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 3},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "onlyonce",
+                                            "label": "立即检查一次",
+                                            "hint": "保存后立即执行一次任务检查，执行后自动关闭",
+                                            "persistent-hint": True
+                                        }
+                                    }
+                                ]
                             }
                         ]
                     },
-                    # 行5：添加离线下载链接
+                    # 行4：添加离线下载链接
                     {
                         "component": "VRow",
                         "content": [
@@ -309,7 +299,7 @@ class Transfer115(_PluginBase):
                             }
                         ]
                     },
-                    # 行6：说明
+                    # 行5：说明
                     {
                         "component": "VRow",
                         "content": [
@@ -323,8 +313,8 @@ class Transfer115(_PluginBase):
                                             "type": "info",
                                             "variant": "tonal",
                                             "text": (
-                                                "【Cookie获取】在115网盘网页版（115.com）按F12打开开发者工具，"
-                                                "切换到Application标签，展开Cookies，复制所有cookie拼接为 key=value; 格式填入。"
+                                                "【授权方式】本插件直接使用MoviePilot已存储的115网盘OAuth授权，"
+                                                "无需额外填写Cookie。请先前往 设置 → 存储 → 115网盘 完成扫码登录。"
                                                 "【目录填写】填写115云盘内的绝对路径，如 /待整理 或 /离线下载/待处理。"
                                                 "【工作流程】插件定时轮询115离线任务 → 发现完成任务 → "
                                                 "自动识别媒体信息并重命名 → 失败时将整个任务文件夹移入整理失败目录（保持文件完整）。"
@@ -341,7 +331,6 @@ class Transfer115(_PluginBase):
             "enabled": False,
             "notify_enabled": False,
             "onlyonce": False,
-            "cookie": "",
             "download_path": "",
             "fail_path": "",
             "poll_interval": 5,
@@ -350,9 +339,31 @@ class Transfer115(_PluginBase):
         }
 
     def get_page(self) -> List[dict]:
+        # Show live 115 authorization status at the top
+        oper = self._get_u115_oper()
+        if oper:
+            status_component = {
+                "component": "VAlert",
+                "props": {
+                    "type": "success",
+                    "variant": "tonal",
+                    "text": "✅ 115网盘已授权（使用MoviePilot存储配置）"
+                }
+            }
+        else:
+            status_component = {
+                "component": "VAlert",
+                "props": {
+                    "type": "error",
+                    "variant": "tonal",
+                    "text": "❌ 115网盘未授权，请前往 设置 → 存储 → 115网盘 完成扫码登录"
+                }
+            }
+
         records = self.get_data("task_records") or []
         if not records:
             return [
+                status_component,
                 {
                     "component": "div",
                     "text": "暂无任务记录",
@@ -388,6 +399,7 @@ class Transfer115(_PluginBase):
             })
 
         return [
+            status_component,
             {
                 "component": "VList",
                 "props": {"lines": "two"},
@@ -423,9 +435,7 @@ class Transfer115(_PluginBase):
         ]
 
     def get_service(self) -> List[Dict[str, Any]]:
-        # Guard includes _client so a bad-cookie startup failure does not register a
-        # scheduler job that would emit "客户端未初始化" warnings on every poll cycle.
-        if self._enabled and self._download_path and self._client is not None:
+        if self._enabled and self._download_path:
             return [
                 {
                     "id": "Transfer115Monitor",
@@ -442,18 +452,13 @@ class Transfer115(_PluginBase):
 
     def __check_and_organize(self):
         """轮询115离线任务，对已完成的任务执行整理"""
-        if not self._client:
-            logger.warning("Transfer115: 115客户端未初始化，跳过任务检查")
+        oper = self._get_u115_oper()
+        if not oper:
+            logger.warning("Transfer115: 115未授权，跳过任务检查")
             return
         try:
-            # NOTE: offline_list() is called with no pagination arguments. The 115 API
-            # is paginated server-side (default ~30-60 results), so users with a very
-            # large task history may find that older tasks are not visible here. We accept
-            # this limitation because the p115client API signature for pagination is not
-            # confirmed; adding page iteration would require knowing the exact parameter
-            # names and response shape.
-            resp = self._client.offline_list()
-            tasks = resp.get("tasks", [])
+            resp = oper._request_api("GET", "/open/offline/get_task_list", params={"page": 1})
+            tasks = (resp or {}).get("data", {}).get("tasks", [])
             # processed_tasks: list of task IDs that completed successfully and need no
             # further action.
             processed = self.get_data("processed_tasks") or []
@@ -488,7 +493,7 @@ class Transfer115(_PluginBase):
 
                 # 已完成且未处理
                 logger.info(f"Transfer115: 发现已完成任务: {task_name}")
-                success = self.__organize_task(task, task_name)
+                success = self.__organize_task(task, task_name, oper)
                 changed = True
 
                 if success:
@@ -510,7 +515,7 @@ class Transfer115(_PluginBase):
                         )
                         # On exhaustion: attempt fail-path move and notify user
                         if self._fail_path and task.get("file_id"):
-                            self.__move_folder_to_fail(task, task_name)
+                            self.__move_folder_to_fail(task, task_name, oper)
                         elif self._notify_enabled:
                             self.post_message(
                                 mtype=NotificationType.Manual,
@@ -528,7 +533,7 @@ class Transfer115(_PluginBase):
         except Exception as e:
             logger.error(f"Transfer115: 任务检查异常: {e}")
 
-    def __organize_task(self, task: dict, task_name: str) -> bool:
+    def __organize_task(self, task: dict, task_name: str, oper) -> bool:
         """对已完成的离线任务进行媒体识别和整理"""
         any_failure = False
         organized_count = 0
@@ -539,8 +544,13 @@ class Transfer115(_PluginBase):
 
             if file_id:
                 try:
-                    resp = self._client.fs_files({"cid": file_id, "limit": 1000})
-                    file_list = resp.get("data", [])
+                    resp = oper._request_api(
+                        "GET",
+                        "/open/ufile/files",
+                        "data",
+                        params={"cid": int(file_id), "limit": 1000}
+                    )
+                    file_list = (resp or [])
                 except Exception as e:
                     logger.warning(f"Transfer115: 获取任务文件列表失败: {e}")
                     file_list = []
@@ -621,7 +631,7 @@ class Transfer115(_PluginBase):
                 )
             return False
 
-    def __move_folder_to_fail(self, task: dict, task_name: str):
+    def __move_folder_to_fail(self, task: dict, task_name: str, oper):
         """将整个任务文件夹移动到整理失败目录"""
         try:
             folder_id = task.get("file_id", "")
@@ -629,27 +639,15 @@ class Transfer115(_PluginBase):
                 logger.warning(f"Transfer115: 无法获取任务文件夹ID，跳过移动: {task_name}")
                 return
 
-            # 确保失败目录存在并获取其ID
+            # Get or create fail folder using oper.get_folder
             try:
-                fail_resp = self._client.fs_makedirs(self._fail_path, exist_ok=True)
-                fail_folder_id = (
-                    fail_resp.get("id") or
-                    fail_resp.get("cid") or
-                    fail_resp.get("file_id", "")
-                )
-                # Log the actual response keys at WARNING level so users can diagnose
-                # if none of the three known key names match a future p115client release.
-                if not fail_folder_id:
-                    logger.warning(
-                        f"Transfer115: fs_makedirs returned unrecognised keys: "
-                        f"{list(fail_resp.keys()) if isinstance(fail_resp, dict) else repr(fail_resp)}"
-                    )
+                fail_item = oper.get_folder(Path(self._fail_path))
             except Exception as e:
-                logger.warning(f"Transfer115: fs_makedirs不可用，尝试其他方式: {e}")
-                fail_folder_id = ""
+                logger.warning(f"Transfer115: 获取失败目录失败: {e}")
+                fail_item = None
 
-            if not fail_folder_id:
-                logger.warning(f"Transfer115: 无法获取失败目录ID: {self._fail_path}")
+            if not fail_item:
+                logger.warning(f"Transfer115: 无法获取失败目录: {self._fail_path}")
                 if self._notify_enabled:
                     self.post_message(
                         mtype=NotificationType.Manual,
@@ -658,8 +656,27 @@ class Transfer115(_PluginBase):
                     )
                 return
 
-            # 移动文件夹
-            self._client.fs_move([folder_id], pid=fail_folder_id)
+            # Get the task folder item using its file_id
+            try:
+                task_item = oper.get_item(Path(
+                    self._download_path.rstrip("/") + "/" + task_name
+                ))
+            except Exception as e:
+                logger.warning(f"Transfer115: 获取任务文件夹失败: {e}")
+                task_item = None
+
+            if not task_item:
+                logger.warning(f"Transfer115: 无法获取任务文件夹，跳过移动: {task_name}")
+                if self._notify_enabled:
+                    self.post_message(
+                        mtype=NotificationType.Manual,
+                        title="115整理失败",
+                        text=f"❌ 任务: {task_name}\n整理失败，请手动移至: {self._fail_path}"
+                    )
+                return
+
+            # Move using oper.move
+            oper.move(task_item, Path(self._fail_path), task_item.name)
             logger.info(f"Transfer115: 已将失败任务 '{task_name}' 的文件夹移至: {self._fail_path}")
             if self._notify_enabled:
                 self.post_message(
