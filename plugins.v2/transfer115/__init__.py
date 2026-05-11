@@ -511,8 +511,10 @@ class Transfer115(_PluginBase):
         }
 
     def get_page(self) -> List[dict]:
-        # SECTION A: Auth status
-        if self._auth_mode == "cookie":
+        # SECTION A: Auth status — only shown when plugin is enabled
+        if not self._enabled:
+            status_component = None
+        elif self._auth_mode == "cookie":
             if not self._cookie:
                 status_component = {
                     "component": "VAlert",
@@ -643,8 +645,8 @@ class Transfer115(_PluginBase):
             parts = browse_path.rstrip("/").rsplit("/", 1)
             parent_path = parts[0] + "/" if parts[0] else "/"
 
-        if self._auth_mode == "cookie":
-            # Cookie mode: hide the directory browser entirely.
+        if self._auth_mode == "cookie" or not self._enabled:
+            # Cookie mode or plugin disabled: hide the directory browser entirely.
             browser_section = None
         else:
             # MP OAuth mode: try to list dirs via StorageChain
