@@ -22,7 +22,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.5"
+    plugin_version = "3.6"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -1046,12 +1046,13 @@ class Transfer115(_PluginBase):
                 task_name = task.get("name", task_id)
                 task_status = task.get("status", 0)
 
+                # 已成功整理的任务优先跳过，避免状态被反向覆写为"下载中"
+                if task_id in processed:
+                    continue
+
                 if task_status != 2:
                     # 未完成
                     self.__upsert_task_record(task_name, "下载中")
-                    continue
-
-                if task_id in processed:
                     continue
 
                 # Check if this task has exhausted its retries
