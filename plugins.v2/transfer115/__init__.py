@@ -22,7 +22,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.8"
+    plugin_version = "3.9"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -142,17 +142,26 @@ class Transfer115(_PluginBase):
                             new_tasks = (list_resp or {}).get("data", {}).get("tasks", [])
                             processed = self.get_data("processed_tasks") or []
                             expected_prefix = self._download_path.strip("/") if self._download_path else None
+                            recorded = 0
                             for t in new_tasks:
                                 t_name = t.get("name", "")
                                 t_id = t.get("info_hash") or t.get("hash", "")
                                 t_file_path = t.get("file_path", "").strip("/")
                                 if not t_name or not t_id or t_id in processed:
                                     continue
-                                # 只记录保存在下载目录下的任务
-                                if expected_prefix and t_file_path and t_file_path.startswith(expected_prefix):
+                                # 记录条件：
+                                # 1. 任务路径已知且属于下载目录，或
+                                # 2. 任务路径为空（刚提交尚未开始下载，路径未填充）且设置了下载目录
+                                path_ok = (
+                                    (expected_prefix and t_file_path and t_file_path.startswith(expected_prefix))
+                                    or (expected_prefix and not t_file_path)
+                                )
+                                if path_ok:
                                     self.__upsert_task_record(t_name, "下载中")
+                                    recorded += 1
+                            logger.info(f"Transfer115: 已记录 {recorded} 个新任务为下载中")
                         except Exception as list_err:
-                            logger.debug(f"Transfer115: 提交后查询任务列表失败（非致命）: {list_err}")
+                            logger.warning(f"Transfer115: 提交后查询任务列表失败: {list_err}")
                         if self._notify_enabled:
                             self.post_message(
                                 mtype=NotificationType.Organize,
