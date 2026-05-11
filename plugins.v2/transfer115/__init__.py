@@ -22,7 +22,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.3"
+    plugin_version = "3.5"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -1058,6 +1058,23 @@ class Transfer115(_PluginBase):
                 retry_count = failed_tasks.get(task_id, 0)
                 if retry_count >= _MAX_TASK_RETRIES:
                     # Already logged on the run that hit the limit; silently skip.
+                    continue
+
+                # 仅处理保存在指定下载目录下的任务
+                # 未设置下载目录、或任务路径不在该目录下，一律跳过
+                task_file_path = task.get("file_path", "").strip("/")
+                if not self._download_path or not task_file_path:
+                    logger.debug(
+                        f"Transfer115: 跳过任务 '{task_name}'，"
+                        f"未设置下载目录或任务路径为空"
+                    )
+                    continue
+                expected_prefix = self._download_path.strip("/")
+                if not task_file_path.startswith(expected_prefix):
+                    logger.debug(
+                        f"Transfer115: 跳过任务 '{task_name}'，"
+                        f"保存路径 '/{task_file_path}' 不在下载目录 '{self._download_path}' 下"
+                    )
                     continue
 
                 # 已完成且未处理
