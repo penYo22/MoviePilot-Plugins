@@ -22,7 +22,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.7"
+    plugin_version = "3.8"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -44,6 +44,7 @@ class Transfer115(_PluginBase):
     _auth_mode: str = "mp_oauth"
     _cookie: str = ""
     _library_path: str = ""
+    _api_interval: int = 0
 
     # 支持的视频文件扩展名
     _video_extensions = (".mkv", ".mp4", ".avi", ".ts", ".rmvb", ".wmv", ".flv", ".mov")
@@ -71,6 +72,12 @@ class Transfer115(_PluginBase):
             logger.warning(f"Transfer115: 初始化Cookie客户端失败: {e}")
             return None
 
+    def _sleep_if_needed(self):
+        """在两次115 API调用之间插入延迟，避免触发风控"""
+        if self._api_interval > 0:
+            import time
+            time.sleep(self._api_interval)
+
     def init_plugin(self, config: dict = None):
         if not config:
             return
@@ -84,6 +91,7 @@ class Transfer115(_PluginBase):
         self._library_path = config.get("library_path", "").strip()
         self._poll_interval = int(config.get("poll_interval", 5) or 5)
         self._transfer_type = config.get("transfer_type", "move")
+        self._api_interval = int(config.get("api_interval", 0) or 0)
 
         # 处理立即提交的链接
         link_input = config.get("link_input", "").strip()
@@ -104,6 +112,7 @@ class Transfer115(_PluginBase):
                             payload = {"urls": "\n".join(lines)}
                             if wp_path_id is not None:
                                 payload["wp_path_id"] = wp_path_id
+                            self._sleep_if_needed()
                             oper.offline_add_urls(payload)
                         else:
                             # Resolve download_path to folder id
@@ -119,13 +128,16 @@ class Transfer115(_PluginBase):
                             data = {"urls": "\n".join(lines)}
                             if wp_path_id is not None:
                                 data["wp_path_id"] = wp_path_id
+                            self._sleep_if_needed()
                             oper._request_api("POST", "/open/offline/add_task_urls", data=data)
                         logger.info(f"Transfer115: 添加离线任务成功，共 {len(lines)} 条")
                         # 提交成功后立即查询任务列表，将属于下载目录的新任务写入记录
                         try:
                             if self._auth_mode == "cookie":
+                                self._sleep_if_needed()
                                 list_resp = oper.offline_list({"page": 1})
                             else:
+                                self._sleep_if_needed()
                                 list_resp = oper._request_api("GET", "/open/offline/get_task_list", params={"page": 1})
                             new_tasks = (list_resp or {}).get("data", {}).get("tasks", [])
                             processed = self.get_data("processed_tasks") or []
@@ -169,6 +181,7 @@ class Transfer115(_PluginBase):
                 "library_path": self._library_path,
                 "poll_interval": self._poll_interval,
                 "transfer_type": self._transfer_type,
+                "api_interval": self._api_interval,
                 "onlyonce": False,
                 "link_input": ""
             })
@@ -242,6 +255,7 @@ class Transfer115(_PluginBase):
             if not path.endswith("/"):
                 path = path + "/"
             fileitem = FileItem(storage="u115", path=path, type="dir")
+            self._sleep_if_needed()
             items = StorageChain().list_files(fileitem) or []
             dirs = [{"name": i.name, "path": i.path} for i in items if i.type == "dir"]
             return {"code": 0, "dirs": dirs}
@@ -264,6 +278,7 @@ class Transfer115(_PluginBase):
             "library_path": self._library_path,
             "poll_interval": self._poll_interval,
             "transfer_type": self._transfer_type,
+            "api_interval": self._api_interval,
             "onlyonce": False,
             "link_input": ""
         }
@@ -486,6 +501,22 @@ class Transfer115(_PluginBase):
                                         }
                                     }
                                 ]
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 3},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "api_interval",
+                                            "label": "API请求间隔(秒)",
+                                            "placeholder": "0",
+                                            "hint": "每次115 API调用前等待的秒数，0表示不等待，建议1-3秒",
+                                            "persistent-hint": True
+                                        }
+                                    }
+                                ]
                             }
                         ]
                     },
@@ -573,6 +604,7 @@ class Transfer115(_PluginBase):
             "fail_path": "",
             "poll_interval": 5,
             "transfer_type": "move",
+            "api_interval": 0,
             "link_input": ""
         }
 
@@ -1047,8 +1079,10 @@ class Transfer115(_PluginBase):
             return
         try:
             if self._auth_mode == "cookie":
+                self._sleep_if_needed()
                 resp = oper.offline_list({"page": 1})
             else:
+                self._sleep_if_needed()
                 resp = oper._request_api("GET", "/open/offline/get_task_list", params={"page": 1})
             tasks = (resp or {}).get("data", {}).get("tasks", [])
             # processed_tasks: list of task IDs that completed successfully and need no
@@ -1173,6 +1207,7 @@ class Transfer115(_PluginBase):
             if file_id:
                 try:
                     if self._auth_mode == "cookie":
+                        self._sleep_if_needed()
                         resp = oper.fs_files({"cid": int(file_id), "limit": 1000})
                         file_list = resp.get("data", [])
                         # NOTE: p115client fetches a single page of up to 1000 items.
@@ -1184,6 +1219,7 @@ class Transfer115(_PluginBase):
                                 "超出部分将被跳过（p115client单页限制）"
                             )
                     else:
+                        self._sleep_if_needed()
                         resp = oper._request_api(
                             "GET",
                             "/open/ufile/files",
@@ -1277,6 +1313,7 @@ class Transfer115(_PluginBase):
             parts = [p for p in path.strip("/").split("/") if p]
             current_id = 0
             for part in parts:
+                self._sleep_if_needed()
                 resp = oper.fs_files({"cid": current_id, "limit": 1000})
                 items = resp.get("data", [])
                 found = None
@@ -1316,6 +1353,7 @@ class Transfer115(_PluginBase):
                             text=f"❌ 任务: {task_name}\n整理失败，请手动移至: {self._fail_path}"
                         )
                     return
+                self._sleep_if_needed()
                 oper.fs_move([int(folder_id)], pid=fail_folder_id)
                 logger.info(f"Transfer115: 已将失败任务 '{task_name}' 的文件夹移至: {self._fail_path}")
                 if self._notify_enabled:
@@ -1365,6 +1403,7 @@ class Transfer115(_PluginBase):
                         )
                     return
 
+                self._sleep_if_needed()
                 oper.move(task_item, Path(self._fail_path), task_item.name)
                 logger.info(f"Transfer115: 已将失败任务 '{task_name}' 的文件夹移至: {self._fail_path}")
                 if self._notify_enabled:
