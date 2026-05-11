@@ -19,7 +19,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.16"
+    plugin_version = "3.17"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -478,7 +478,7 @@ class Transfer115(_PluginBase):
                         if new_name and new_name != item.name:
                             try:
                                 self._sleep_if_needed()
-                                oper._request_api("POST", "/open/ufile/update", data={"fid": int(item.fileid), "file_name": new_name})
+                                oper._request_api("POST", "/open/ufile/update", data={"file_id": int(item.fileid), "file_name": new_name})
                                 renamed_count += 1
                                 logger.info(f"Transfer115: 重命名成功: {item.name} -> {new_name}")
                             except Exception as e:
@@ -546,7 +546,7 @@ class Transfer115(_PluginBase):
                 if not oper:
                     return {"code": 1, "msg": "115未授权"}
                 self._sleep_if_needed()
-                oper._request_api("POST", "/open/ufile/update", data={"fid": int(fileid), "file_name": new_name})
+                oper._request_api("POST", "/open/ufile/update", data={"file_id": int(fileid), "file_name": new_name})
             else:
                 oper = self._get_cookie_oper()
                 if not oper:
@@ -595,7 +595,7 @@ class Transfer115(_PluginBase):
                             if self._auth_mode == "mp_oauth":
                                 oper = self._get_u115_oper()
                                 if oper:
-                                    oper._request_api("POST", "/open/ufile/update", data={"fid": int(fid), "file_name": new_name})
+                                    oper._request_api("POST", "/open/ufile/update", data={"file_id": int(fid), "file_name": new_name})
                                     renamed += 1
                             else:
                                 oper = self._get_cookie_oper()
@@ -846,23 +846,21 @@ class Transfer115(_PluginBase):
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 5},
+                                "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
                                         "component": "VTextField",
                                         "props": {
                                             "model": "rename_find",
                                             "label": "批量重命名 - 查找",
-                                            "placeholder": "输入要查找的文件名关键词",
-                                            "hint": "在数据页展开文件夹后，可点击单个文件的「重命名」或「批量重命名」按钮执行",
-                                            "persistent-hint": True
+                                            "placeholder": "输入要查找的文件名关键词"
                                         }
                                     }
                                 ]
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 5},
+                                "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -870,21 +868,6 @@ class Transfer115(_PluginBase):
                                             "model": "rename_replace",
                                             "label": "批量重命名 - 替换为",
                                             "placeholder": "替换后的内容（留空则删除匹配文本）"
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 2},
-                                "content": [
-                                    {
-                                        "component": "VAlert",
-                                        "props": {
-                                            "type": "info",
-                                            "variant": "tonal",
-                                            "density": "compact",
-                                            "text": "数据页执行"
                                         }
                                     }
                                 ]

@@ -3,7 +3,7 @@
         "name": "115离线整理",
         "description": "⚠️ 未经测试，封号自理。使用MoviePilot已存储的115授权或自填Cookie，添加离线下载任务，完成后自动识别重命名，失败文件夹整体归档",
         "labels": "115,离线下载,云盘,媒体整理",
-        "version": "3.16",
+        "version": "3.17",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "penYo22",
         "level": 1,
@@ -26,7 +26,8 @@
             "v3.13": "改为手动整理模式：数据页直接显示文件夹列表，移除自动轮询整理",
             "v3.14": "修复：整理调用使用正确的v2 API签名（FileItem参数）",
             "v3.15": "新增批量重命名功能：查找替换下载目录中的文件名",
-            "v3.16": "增强重命名：数据页展开文件夹查看文件，支持单个/批量重命名"
+            "v3.16": "增强重命名：数据页展开文件夹查看文件，支持单个/批量重命名",
+            "v3.17": "修复：重命名API使用正确字段名file_id，清理设置页"
         }
     }
 }
