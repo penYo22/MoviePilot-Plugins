@@ -121,19 +121,23 @@ class Transfer115(_PluginBase):
                                 data["wp_path_id"] = wp_path_id
                             oper._request_api("POST", "/open/offline/add_task_urls", data=data)
                         logger.info(f"Transfer115: 添加离线任务成功，共 {len(lines)} 条")
-                        # 提交成功后立即查询任务列表，将新任务写入记录
+                        # 提交成功后立即查询任务列表，将属于下载目录的新任务写入记录
                         try:
                             if self._auth_mode == "cookie":
                                 list_resp = oper.offline_list({"page": 1})
                             else:
                                 list_resp = oper._request_api("GET", "/open/offline/get_task_list", params={"page": 1})
                             new_tasks = (list_resp or {}).get("data", {}).get("tasks", [])
-                            # Write any task that is not yet in records as "下载中"
                             processed = self.get_data("processed_tasks") or []
+                            expected_prefix = self._download_path.strip("/") if self._download_path else None
                             for t in new_tasks:
                                 t_name = t.get("name", "")
                                 t_id = t.get("info_hash") or t.get("hash", "")
-                                if t_name and t_id and t_id not in processed:
+                                t_file_path = t.get("file_path", "").strip("/")
+                                if not t_name or not t_id or t_id in processed:
+                                    continue
+                                # 只记录保存在下载目录下的任务
+                                if expected_prefix and t_file_path and t_file_path.startswith(expected_prefix):
                                     self.__upsert_task_record(t_name, "下载中")
                         except Exception as list_err:
                             logger.debug(f"Transfer115: 提交后查询任务列表失败（非致命）: {list_err}")
