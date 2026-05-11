@@ -3,7 +3,7 @@
         "name": "115离线整理",
         "description": "⚠️ 未经测试，封号自理。使用MoviePilot已存储的115授权或自填Cookie，添加离线下载任务，完成后自动识别重命名，失败文件夹整体归档",
         "labels": "115,离线下载,云盘,媒体整理",
-        "version": "3.13",
+        "version": "3.14",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "penYo22",
         "level": 1,
@@ -23,7 +23,8 @@
             "v3.10": "修复：下载完成后自动整理失败问题（路径为空时不再跳过、transfer结果判断修正）",
             "v3.11": "修复：整理重命名使用115云盘在线整理（TransferChain），正确识别和重命名文件",
             "v3.12": "新增手动整理功能：数据页展示下载目录文件夹，支持单个/一键整理",
-            "v3.13": "改为手动整理模式：数据页直接显示文件夹列表，移除自动轮询整理"
+            "v3.13": "改为手动整理模式：数据页直接显示文件夹列表，移除自动轮询整理",
+            "v3.14": "修复：整理调用使用正确的v2 API签名（FileItem参数）"
         }
     }
 }

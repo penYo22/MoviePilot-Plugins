@@ -19,7 +19,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.13"
+    plugin_version = "3.14"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -352,17 +352,29 @@ class Transfer115(_PluginBase):
             return {"code": 1, "msg": f"无法整理 {Path(folder_path).name}：文件夹ID不可用，请检查115授权状态"}
         try:
             from app.chain.transfer import TransferChain
-            transfer_kwargs = dict(
+            from app.schemas import FileItem
+
+            folder_name = Path(folder_path).name
+            # 构造 FileItem 对象，path 需要以 / 结尾表示目录
+            file_path = folder_path if folder_path.endswith("/") else folder_path + "/"
+            fileitem = FileItem(
                 storage="u115",
-                in_path=Path(folder_path),
+                type="dir",
+                path=file_path,
+                name=folder_name,
                 fileid=fileid,
-                filetype="dir",
+            )
+
+            transfer_kwargs = dict(
+                fileitem=fileitem,
                 transfer_type=self._transfer_type,
             )
             if self._library_path:
-                transfer_kwargs["target"] = Path(self._library_path)
+                transfer_kwargs["target_path"] = Path(self._library_path)
+
+            logger.info(f"Transfer115: 开始整理: {folder_path} (fileid={fileid})")
             state, errmsg = TransferChain().manual_transfer(**transfer_kwargs)
-            folder_name = Path(folder_path).name
+
             if state:
                 self.__upsert_task_record(folder_name, "整理完成")
                 logger.info(f"Transfer115: 手动整理成功: {folder_path}")
