@@ -348,7 +348,7 @@ class Transfer115(_PluginBase):
                 self._sleep_if_needed()
                 items = StorageChain().list_files(fileitem) or []
                 folders = [
-                    {"name": i.name, "path": i.path, "fileid": i.fileid or ""}
+                    {"name": i.name, "path": i.path, "fileid": i.fileid if i.fileid else None}
                     for i in items if i.type == "dir"
                 ]
             else:  # cookie
@@ -372,8 +372,10 @@ class Transfer115(_PluginBase):
 
     def api_organize_folder(self, folder_path: str = "", fileid: str = "") -> dict:
         """整理单个文件夹"""
-        if not folder_path or not fileid:
-            return {"code": 1, "msg": "缺少参数"}
+        if not folder_path:
+            return {"code": 1, "msg": "缺少参数: folder_path"}
+        if not fileid:
+            return {"code": 1, "msg": f"无法整理 {Path(folder_path).name}：文件夹ID不可用，请检查115授权状态"}
         try:
             from app.chain.transfer import TransferChain
             transfer_kwargs = dict(
@@ -415,7 +417,9 @@ class Transfer115(_PluginBase):
                 success_count += 1
             else:
                 fail_count += 1
-        return {"code": 0, "msg": f"整理完成：成功 {success_count} 个，失败 {fail_count} 个"}
+            self._sleep_if_needed()
+        code = 1 if success_count == 0 and fail_count > 0 else 0
+        return {"code": code, "msg": f"整理完成：成功 {success_count} 个，失败 {fail_count} 个"}
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
