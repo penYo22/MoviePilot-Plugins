@@ -19,7 +19,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.15"
+    plugin_version = "3.16"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -168,15 +168,14 @@ class Transfer115(_PluginBase):
                 else:
                     logger.warning("Transfer115: 链接已填写但115未授权或Cookie无效")
 
-        # 处理批量重命名
+        # 保存重命名参数供数据页使用
         rename_find = config.get("rename_find", "").strip()
         rename_replace = config.get("rename_replace", "")
-        if rename_find:
-            result = self.api_batch_rename(find=rename_find, replace=rename_replace)
-            logger.info(f"Transfer115: 批量重命名结果: {result.get('msg', '')}")
+        self.save_data("rename_find_value", rename_find)
+        self.save_data("rename_replace_value", rename_replace)
 
-        # 清空 link_input 和 rename 字段
-        if link_input or rename_find:
+        # 清空 link_input（重命名参数保留供数据页按钮使用）
+        if link_input:
             self.update_config({
                 "enabled": self._enabled,
                 "notify_enabled": self._notify_enabled,
@@ -188,8 +187,8 @@ class Transfer115(_PluginBase):
                 "transfer_type": self._transfer_type,
                 "api_interval": self._api_interval,
                 "link_input": "",
-                "rename_find": "",
-                "rename_replace": ""
+                "rename_find": rename_find,
+                "rename_replace": rename_replace
             })
 
     def get_state(self) -> bool:
@@ -256,6 +255,34 @@ class Transfer115(_PluginBase):
                 "methods": ["GET"],
                 "auth": "bear",
                 "summary": "批量重命名文件"
+            },
+            {
+                "path": "/rename_file",
+                "endpoint": self.api_rename_file,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "重命名单个文件"
+            },
+            {
+                "path": "/list_folder_files",
+                "endpoint": self.api_list_folder_files,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "展开文件夹"
+            },
+            {
+                "path": "/collapse_folder",
+                "endpoint": self.api_collapse_folder,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "收起文件夹"
+            },
+            {
+                "path": "/rename_folder_files",
+                "endpoint": self.api_rename_folder_files,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "批量重命名文件夹内文件"
             }
         ]
 
@@ -500,6 +527,134 @@ class Transfer115(_PluginBase):
             logger.error(f"Transfer115: 批量重命名异常: {e}")
             return {"code": 1, "msg": str(e)}
 
+    def api_rename_file(self, fileid: str = "", old_name: str = "", find: str = "", replace: str = "") -> dict:
+        """重命名单个文件"""
+        if not fileid or not old_name:
+            return {"code": 1, "msg": "缺少参数"}
+        if not find:
+            return {"code": 1, "msg": "未指定查找关键词，请在设置页填写「批量重命名-查找」"}
+
+        new_name = old_name.replace(find, replace)
+        if new_name == old_name:
+            return {"code": 0, "msg": f"文件名不包含「{find}」，无需重命名"}
+        if not new_name:
+            return {"code": 1, "msg": "替换后文件名为空，不允许"}
+
+        try:
+            if self._auth_mode == "mp_oauth":
+                oper = self._get_u115_oper()
+                if not oper:
+                    return {"code": 1, "msg": "115未授权"}
+                self._sleep_if_needed()
+                oper._request_api("POST", "/open/ufile/update", data={"fid": int(fileid), "file_name": new_name})
+            else:
+                oper = self._get_cookie_oper()
+                if not oper:
+                    return {"code": 1, "msg": "Cookie客户端初始化失败"}
+                self._sleep_if_needed()
+                oper.fs_rename({int(fileid): new_name})
+
+            logger.info(f"Transfer115: 重命名成功: {old_name} -> {new_name}")
+            return {"code": 0, "msg": f"重命名成功: {new_name}"}
+        except Exception as e:
+            logger.error(f"Transfer115: 重命名失败: {e}")
+            return {"code": 1, "msg": str(e)}
+
+    def api_list_folder_files(self, folder_fileid: str = "", folder_path: str = "") -> dict:
+        """列出文件夹内的文件，并保存展开状态"""
+        self.save_data("expanded_folder", {"fileid": folder_fileid, "path": folder_path})
+        return {"code": 0}
+
+    def api_collapse_folder(self) -> dict:
+        """收起文件夹"""
+        self.del_data("expanded_folder")
+        return {"code": 0}
+
+    def api_rename_folder_files(self, folder_fileid: str = "", find: str = "", replace: str = "") -> dict:
+        """批量重命名文件夹内所有文件"""
+        if not folder_fileid:
+            return {"code": 1, "msg": "缺少文件夹ID"}
+        if not find:
+            return {"code": 1, "msg": "未指定查找关键词"}
+
+        try:
+            items = self._list_files_in_folder(folder_fileid)
+            if items is None:
+                return {"code": 1, "msg": "获取文件列表失败"}
+
+            renamed = 0
+            failed = 0
+            for item in items:
+                name = item.get("name", "")
+                fid = item.get("fileid", "")
+                if find in name and fid:
+                    new_name = name.replace(find, replace)
+                    if new_name and new_name != name:
+                        try:
+                            self._sleep_if_needed()
+                            if self._auth_mode == "mp_oauth":
+                                oper = self._get_u115_oper()
+                                if oper:
+                                    oper._request_api("POST", "/open/ufile/update", data={"fid": int(fid), "file_name": new_name})
+                                    renamed += 1
+                            else:
+                                oper = self._get_cookie_oper()
+                                if oper:
+                                    oper.fs_rename({int(fid): new_name})
+                                    renamed += 1
+                        except Exception as e:
+                            failed += 1
+                            logger.warning(f"Transfer115: 重命名失败 {name}: {e}")
+
+            if renamed == 0 and failed == 0:
+                return {"code": 0, "msg": f"没有文件名包含「{find}」"}
+            return {"code": 0, "msg": f"批量重命名完成：成功 {renamed} 个，失败 {failed} 个"}
+        except Exception as e:
+            return {"code": 1, "msg": str(e)}
+
+    def _list_files_in_folder(self, folder_fileid: str) -> Optional[List[dict]]:
+        """获取文件夹内的文件和子目录列表"""
+        try:
+            if self._auth_mode == "mp_oauth":
+                oper = self._get_u115_oper()
+                if not oper:
+                    return None
+                self._sleep_if_needed()
+                resp = oper._request_api("GET", "/open/ufile/files", "data", params={"cid": int(folder_fileid), "limit": 500, "show_dir": 1})
+                if resp is None:
+                    return None
+                items = []
+                for item in resp:
+                    items.append({
+                        "name": item.get("fn", ""),
+                        "fileid": str(item.get("fid", "")),
+                        "type": "dir" if item.get("fc") == "0" else "file",
+                        "size": item.get("fs", 0) if item.get("fc") != "0" else 0,
+                    })
+                return items
+            else:
+                oper = self._get_cookie_oper()
+                if not oper:
+                    return None
+                self._sleep_if_needed()
+                resp = oper.fs_files({"cid": int(folder_fileid), "limit": 500})
+                items_data = resp.get("data", [])
+                items = []
+                for item in items_data:
+                    name = item.get("n", "")
+                    fid = item.get("fid") or item.get("cid")
+                    is_dir = item.get("fid") is None
+                    items.append({
+                        "name": name,
+                        "fileid": str(fid) if fid else "",
+                        "type": "dir" if is_dir else "file",
+                        "size": item.get("s", 0) if not is_dir else 0,
+                    })
+                return items
+        except Exception as e:
+            logger.warning(f"Transfer115: 获取文件夹内容失败: {e}")
+            return None
+
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
             {
@@ -699,7 +854,7 @@ class Transfer115(_PluginBase):
                                             "model": "rename_find",
                                             "label": "批量重命名 - 查找",
                                             "placeholder": "输入要查找的文件名关键词",
-                                            "hint": "保存后将自动对下载目录中文件名包含此关键词的文件/文件夹执行重命名",
+                                            "hint": "在数据页展开文件夹后，可点击单个文件的「重命名」或「批量重命名」按钮执行",
                                             "persistent-hint": True
                                         }
                                     }
@@ -729,7 +884,7 @@ class Transfer115(_PluginBase):
                                             "type": "info",
                                             "variant": "tonal",
                                             "density": "compact",
-                                            "text": "保存生效"
+                                            "text": "数据页执行"
                                         }
                                     }
                                 ]
@@ -986,6 +1141,15 @@ class Transfer115(_PluginBase):
             folder_list = folder_result.get("folders", [])
             folder_error = folder_result.get("msg") if folder_result.get("code") != 0 else None
 
+            # Check if a folder is expanded
+            expanded_folder = self.get_data("expanded_folder") or {}
+            expanded_fileid = expanded_folder.get("fileid", "")
+            expanded_path = expanded_folder.get("path", "")
+
+            # Get find/replace values for rename buttons
+            rename_find = self.get_data("rename_find_value") or ""
+            rename_replace = self.get_data("rename_replace_value") or ""
+
             folder_rows = []
             if folder_error:
                 folder_rows.append({
@@ -1001,6 +1165,47 @@ class Transfer115(_PluginBase):
                 })
             else:
                 for folder in folder_list:
+                    is_expanded = (folder.get("fileid") == expanded_fileid and expanded_fileid)
+                    buttons = [
+                        {
+                            "component": "VBtn",
+                            "props": {"size": "x-small", "variant": "tonal", "color": "primary", "class": "mr-1"},
+                            "text": "整理",
+                            "events": {
+                                "click": {
+                                    "api": "plugin/Transfer115/organize_folder",
+                                    "method": "get",
+                                    "params": {"folder_path": folder["path"], "fileid": folder.get("fileid") or ""}
+                                }
+                            }
+                        },
+                    ]
+                    if is_expanded:
+                        buttons.append({
+                            "component": "VBtn",
+                            "props": {"size": "x-small", "variant": "tonal", "color": "secondary"},
+                            "text": "收起",
+                            "events": {
+                                "click": {
+                                    "api": "plugin/Transfer115/collapse_folder",
+                                    "method": "get"
+                                }
+                            }
+                        })
+                    else:
+                        buttons.append({
+                            "component": "VBtn",
+                            "props": {"size": "x-small", "variant": "tonal", "color": "info"},
+                            "text": "展开文件",
+                            "events": {
+                                "click": {
+                                    "api": "plugin/Transfer115/list_folder_files",
+                                    "method": "get",
+                                    "params": {"folder_fileid": folder.get("fileid") or "", "folder_path": folder["path"]}
+                                }
+                            }
+                        })
+
                     folder_rows.append({
                         "component": "VListItem",
                         "props": {"density": "compact"},
@@ -1012,29 +1217,92 @@ class Transfer115(_PluginBase):
                             },
                             {
                                 "component": "VListItemSubtitle",
-                                "content": [
+                                "content": buttons
+                            }
+                        ]
+                    })
+
+                    # If this folder is expanded, show its files
+                    if is_expanded:
+                        file_items = self._list_files_in_folder(expanded_fileid)
+                        if file_items:
+                            for fitem in file_items:
+                                type_icon = "📁 " if fitem["type"] == "dir" else "📄 "
+                                file_buttons = [
                                     {
                                         "component": "VBtn",
-                                        "props": {"size": "x-small", "variant": "tonal", "color": "primary"},
-                                        "text": "整理",
+                                        "props": {"size": "x-small", "variant": "tonal", "color": "warning"},
+                                        "text": "重命名",
                                         "events": {
                                             "click": {
-                                                "api": "plugin/Transfer115/organize_folder",
+                                                "api": "plugin/Transfer115/rename_file",
                                                 "method": "get",
-                                                "params": {"folder_path": folder["path"], "fileid": folder.get("fileid") or ""}
+                                                "params": {
+                                                    "fileid": fitem["fileid"],
+                                                    "old_name": fitem["name"],
+                                                    "find": rename_find,
+                                                    "replace": rename_replace
+                                                }
                                             }
                                         }
                                     }
                                 ]
-                            }
-                        ]
-                    })
+                                folder_rows.append({
+                                    "component": "VListItem",
+                                    "props": {"density": "compact", "class": "pl-8"},
+                                    "content": [
+                                        {
+                                            "component": "VListItemTitle",
+                                            "props": {"class": "text-caption"},
+                                            "text": f"{type_icon}{fitem['name']}"
+                                        },
+                                        {
+                                            "component": "VListItemSubtitle",
+                                            "content": file_buttons
+                                        }
+                                    ]
+                                })
+                        else:
+                            folder_rows.append({
+                                "component": "div",
+                                "text": "    文件夹为空或获取失败",
+                                "props": {"class": "text-caption pl-8 pa-1"}
+                            })
 
             folder_list_content = [{
                 "component": "VList",
                 "props": {"lines": "two", "density": "compact"},
                 "content": folder_rows
             }] if folder_list else folder_rows
+
+            # Header buttons
+            header_buttons = [
+                {
+                    "component": "VBtn",
+                    "props": {"size": "x-small", "variant": "tonal", "color": "success"},
+                    "text": "一键全部整理",
+                    "events": {
+                        "click": {
+                            "api": "plugin/Transfer115/organize_all",
+                            "method": "get"
+                        }
+                    }
+                }
+            ]
+            # Add batch rename button if a folder is expanded and find value is set
+            if expanded_fileid and rename_find:
+                header_buttons.append({
+                    "component": "VBtn",
+                    "props": {"size": "x-small", "variant": "tonal", "color": "warning"},
+                    "text": f"批量重命名（{rename_find}→{rename_replace}）",
+                    "events": {
+                        "click": {
+                            "api": "plugin/Transfer115/rename_folder_files",
+                            "method": "get",
+                            "params": {"folder_fileid": expanded_fileid, "find": rename_find, "replace": rename_replace}
+                        }
+                    }
+                })
 
             download_folders_section = {
                 "component": "VCard",
@@ -1054,20 +1322,8 @@ class Transfer115(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCol",
-                                        "props": {"cols": 12, "class": "d-flex ga-2 justify-end"},
-                                        "content": [
-                                            {
-                                                "component": "VBtn",
-                                                "props": {"size": "x-small", "variant": "tonal", "color": "success"},
-                                                "text": "一键全部整理",
-                                                "events": {
-                                                    "click": {
-                                                        "api": "plugin/Transfer115/organize_all",
-                                                        "method": "get"
-                                                    }
-                                                }
-                                            }
-                                        ]
+                                        "props": {"cols": 12, "class": "d-flex ga-2 flex-wrap justify-end"},
+                                        "content": header_buttons
                                     }
                                 ]
                             }
