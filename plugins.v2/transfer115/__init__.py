@@ -22,7 +22,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.1"
+    plugin_version = "3.2"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -95,13 +95,29 @@ class Transfer115(_PluginBase):
                 if oper:
                     try:
                         if self._auth_mode == "cookie":
-                            oper.offline_add_urls({"urls": "\n".join(lines)})
+                            wp_path_id = None
+                            if self._download_path:
+                                wp_path_id = self._get_folder_id_by_path_cookie(self._download_path, oper)
+
+                            payload = {"urls": "\n".join(lines)}
+                            if wp_path_id is not None:
+                                payload["wp_path_id"] = wp_path_id
+                            oper.offline_add_urls(payload)
                         else:
-                            oper._request_api(
-                                "POST",
-                                "/open/offline/add_task_urls",
-                                data={"urls": "\n".join(lines)}
-                            )
+                            # Resolve download_path to folder id
+                            wp_path_id = None
+                            if self._download_path:
+                                try:
+                                    folder_item = oper.get_folder(Path(self._download_path))
+                                    if folder_item:
+                                        wp_path_id = int(folder_item.fileid)
+                                except Exception as e:
+                                    logger.warning(f"Transfer115: 无法解析下载目录ID，将使用根目录: {e}")
+
+                            data = {"urls": "\n".join(lines)}
+                            if wp_path_id is not None:
+                                data["wp_path_id"] = wp_path_id
+                            oper._request_api("POST", "/open/offline/add_task_urls", data=data)
                         logger.info(f"Transfer115: 添加离线任务成功，共 {len(lines)} 条")
                         if self._notify_enabled:
                             self.post_message(
@@ -1052,8 +1068,13 @@ class Transfer115(_PluginBase):
                     any_failure = True
                     continue
 
-                task_folder_path = self._download_path.rstrip("/") + "/" + task_name
-                cloud_path = Path(task_folder_path) / fname
+                # Prefer the actual file_path from the task; fall back to constructed path
+                task_file_path = task.get("file_path", "").strip("/")
+                if task_file_path:
+                    cloud_path = Path("/" + task_file_path) / fname
+                else:
+                    task_folder_path = self._download_path.rstrip("/") + "/" + task_name
+                    cloud_path = Path(task_folder_path) / fname
                 result = self.chain.transfer(
                     path=cloud_path,
                     meta=meta,
@@ -1171,10 +1192,15 @@ class Transfer115(_PluginBase):
                         )
                     return
 
+                # Try to get file_path from task first, else construct
+                task_file_path = task.get("file_path", "").strip("/")
+                if task_file_path:
+                    task_folder_path = "/" + task_file_path
+                else:
+                    task_folder_path = self._download_path.rstrip("/") + "/" + task_name
+
                 try:
-                    task_item = oper.get_item(Path(
-                        self._download_path.rstrip("/") + "/" + task_name
-                    ))
+                    task_item = oper.get_item(Path(task_folder_path))
                 except Exception as e:
                     logger.warning(f"Transfer115: 获取任务文件夹失败: {e}")
                     task_item = None
