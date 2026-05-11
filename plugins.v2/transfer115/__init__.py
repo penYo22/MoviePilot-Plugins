@@ -22,7 +22,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.9"
+    plugin_version = "3.10"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -1132,21 +1132,21 @@ class Transfer115(_PluginBase):
                     continue
 
                 # 仅处理保存在指定下载目录下的任务
-                # 未设置下载目录、或任务路径不在该目录下，一律跳过
-                task_file_path = task.get("file_path", "").strip("/")
-                if not self._download_path or not task_file_path:
-                    logger.debug(
-                        f"Transfer115: 跳过任务 '{task_name}'，"
-                        f"未设置下载目录或任务路径为空"
-                    )
+                # 未设置下载目录，一律跳过
+                if not self._download_path:
+                    logger.debug(f"Transfer115: 跳过任务 '{task_name}'，未设置下载目录")
                     continue
+                task_file_path = task.get("file_path", "").strip("/")
                 expected_prefix = self._download_path.strip("/")
-                if not task_file_path.startswith(expected_prefix):
+                if task_file_path and not task_file_path.startswith(expected_prefix):
                     logger.debug(
                         f"Transfer115: 跳过任务 '{task_name}'，"
                         f"保存路径 '/{task_file_path}' 不在下载目录 '{self._download_path}' 下"
                     )
                     continue
+                # task_file_path 为空时，说明路径尚未填充，按下载目录+任务名构造路径，继续处理
+                if not task_file_path:
+                    logger.debug(f"Transfer115: 任务 '{task_name}' 路径为空，将使用下载目录+任务名构造路径")
 
                 # 两阶段处理：
                 # 第一次轮询到 status=2 时只写"下载完成"，等下次轮询再整理，
@@ -1277,7 +1277,7 @@ class Transfer115(_PluginBase):
                     transfer_kwargs["target_path"] = Path(self._library_path)
                 result = self.chain.transfer(**transfer_kwargs)
 
-                if result:
+                if result and result.success:
                     organized_count += 1
                     logger.info(f"Transfer115: 整理成功: {fname} -> {mediainfo.title}")
                     if self._notify_enabled:
@@ -1287,7 +1287,8 @@ class Transfer115(_PluginBase):
                             text=f"✅ {fname}\n识别为: {mediainfo.title}"
                         )
                 else:
-                    logger.warning(f"Transfer115: 整理失败: {fname}")
+                    err_msg = getattr(result, 'message', '') if result else '整理链返回空'
+                    logger.warning(f"Transfer115: 整理失败: {fname}，原因: {err_msg}")
                     any_failure = True
 
             if any_failure:
