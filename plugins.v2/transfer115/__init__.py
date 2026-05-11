@@ -18,7 +18,7 @@ class Transfer115(_PluginBase):
     # 插件名称
     plugin_name = "115离线整理"
     # 插件描述
-    plugin_desc = "使用MoviePilot已存储的115授权或自填Cookie，添加离线下载任务，完成后自动识别重命名，失败文件夹整体归档"
+    plugin_desc = "⚠️ 未经测试，封号自理。使用MoviePilot已存储的115授权或自填Cookie，添加离线下载任务，完成后自动识别重命名，失败文件夹整体归档"
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
@@ -447,7 +447,30 @@ class Transfer115(_PluginBase):
                             }
                         ]
                     },
-                    # 行7：说明
+                    # 行7：免责声明
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VAlert",
+                                        "props": {
+                                            "type": "warning",
+                                            "variant": "tonal",
+                                            "text": (
+                                                "⚠️ 免责声明：本插件未经充分测试，使用115网盘离线下载及API功能存在账号被封禁风险，后果自负，封号自理。"
+                                                "建议在小号或测试账号上使用。"
+                                            )
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    # 行8：使用说明
                     {
                         "component": "VRow",
                         "content": [

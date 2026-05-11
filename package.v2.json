@@ -1,7 +1,7 @@
 {
     "Transfer115": {
         "name": "115离线整理",
-        "description": "使用MoviePilot已存储的115授权或自填Cookie，添加离线下载任务，完成后自动识别重命名，失败文件夹整体归档",
+        "description": "⚠️ 未经测试，封号自理。使用MoviePilot已存储的115授权或自填Cookie，添加离线下载任务，完成后自动识别重命名，失败文件夹整体归档",
         "labels": "115,离线下载,云盘,媒体整理",
         "version": "3.0",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
