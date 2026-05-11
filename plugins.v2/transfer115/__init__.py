@@ -340,6 +340,7 @@ class Transfer115(_PluginBase):
         if not self._download_path:
             return {"code": 1, "msg": "未设置下载目录", "folders": []}
         try:
+            truncated = False
             if self._auth_mode == "mp_oauth":
                 from app.chain.storage import StorageChain
                 from app.schemas import FileItem
@@ -365,7 +366,15 @@ class Transfer115(_PluginBase):
                     {"name": i.get("n", ""), "path": self._download_path.rstrip("/") + "/" + i.get("n", ""), "fileid": str(i.get("cid", ""))}
                     for i in items if i.get("fid") is None and i.get("n")
                 ]
-            return {"code": 0, "folders": folders}
+                if len(items) >= 200:
+                    truncated = True
+                    logger.warning(f"Transfer115: Cookie模式子文件夹列表已达上限200个，可能不完整")
+            self.save_data("folder_list_cache", folders)
+            self.save_data("folder_list_truncated", truncated)
+            result = {"code": 0, "folders": folders}
+            if truncated:
+                result["warning"] = "Cookie模式仅显示前200个子文件夹，列表可能不完整"
+            return result
         except Exception as e:
             logger.warning(f"Transfer115: 列出下载目录失败: {e}")
             return {"code": 1, "msg": str(e), "folders": []}
@@ -879,17 +888,18 @@ class Transfer115(_PluginBase):
             ]
         }
 
-        # SECTION B2: Download folder list for manual organize
+        # SECTION B2: Download folder list for manual organize (lazy-loaded via cache)
         if self._enabled and self._download_path:
-            folder_list_result = self.api_list_download_folders()
-            folder_list = folder_list_result.get("folders", [])
-            folder_error = folder_list_result.get("msg") if folder_list_result.get("code") != 0 else None
+            folder_list = self.get_data("folder_list_cache")
+            folder_cache_loaded = folder_list is not None
+            folder_truncated = self.get_data("folder_list_truncated") or False
 
             folder_rows = []
-            if folder_error:
+            if not folder_cache_loaded:
                 folder_rows.append({
-                    "component": "VAlert",
-                    "props": {"type": "warning", "variant": "tonal", "density": "compact", "text": f"获取文件夹列表失败: {folder_error}"}
+                    "component": "div",
+                    "text": "点击「刷新列表」加载下载目录中的子文件夹",
+                    "props": {"class": "text-caption text-center pa-2"}
                 })
             elif not folder_list:
                 folder_rows.append({
@@ -919,7 +929,7 @@ class Transfer115(_PluginBase):
                                             "click": {
                                                 "api": "plugin/Transfer115/organize_folder",
                                                 "method": "get",
-                                                "params": {"folder_path": folder["path"], "fileid": folder["fileid"]}
+                                                "params": {"folder_path": folder["path"], "fileid": folder["fileid"] or ""}
                                             }
                                         }
                                     }
@@ -934,7 +944,19 @@ class Transfer115(_PluginBase):
                     "props": {"lines": "two", "density": "compact"},
                     "content": folder_rows
                 }
-            ] if folder_list else folder_rows
+            ] if (folder_cache_loaded and folder_list) else folder_rows
+
+            truncation_warning_content = []
+            if folder_truncated:
+                truncation_warning_content.append({
+                    "component": "VAlert",
+                    "props": {
+                        "type": "warning",
+                        "variant": "tonal",
+                        "density": "compact",
+                        "text": "Cookie模式仅显示前200个子文件夹，列表可能不完整"
+                    }
+                })
 
             download_folders_section = {
                 "component": "VCard",
@@ -954,8 +976,19 @@ class Transfer115(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCol",
-                                        "props": {"cols": 12, "class": "text-right"},
+                                        "props": {"cols": 12, "class": "d-flex ga-2 justify-end"},
                                         "content": [
+                                            {
+                                                "component": "VBtn",
+                                                "props": {"size": "x-small", "variant": "tonal", "color": "secondary"},
+                                                "text": "刷新列表",
+                                                "events": {
+                                                    "click": {
+                                                        "api": "plugin/Transfer115/list_download_folders",
+                                                        "method": "get"
+                                                    }
+                                                }
+                                            },
                                             {
                                                 "component": "VBtn",
                                                 "props": {"size": "x-small", "variant": "tonal", "color": "success"},
@@ -971,7 +1004,7 @@ class Transfer115(_PluginBase):
                                     }
                                 ]
                             }
-                        ] + folder_list_content
+                        ] + truncation_warning_content + folder_list_content
                     }
                 ]
             }
