@@ -1,12 +1,10 @@
 # NOTE: This plugin runs inside the MoviePilot plugin framework, which has no test
 # infrastructure (no pytest setup, no test directory, no test runner configured).
 # Unit tests for this plugin cannot be written here; manual verification via the
-# MoviePilot UI and the onlyonce trigger is the only available testing approach.
+# MoviePilot UI is the only available testing approach.
 import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
-from apscheduler.triggers.interval import IntervalTrigger
 
 from app.log import logger
 from app.plugins import _PluginBase
@@ -21,7 +19,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.12"
+    plugin_version = "3.13"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -38,7 +36,6 @@ class Transfer115(_PluginBase):
     _notify_enabled: bool = False
     _download_path: str = ""
     _fail_path: str = ""
-    _poll_interval: int = 5
     _transfer_type: str = "move"
     _auth_mode: str = "mp_oauth"
     _cookie: str = ""
@@ -88,7 +85,6 @@ class Transfer115(_PluginBase):
         self._download_path = config.get("download_path", "").strip()
         self._fail_path = config.get("fail_path", "").strip()
         self._library_path = config.get("library_path", "").strip()
-        self._poll_interval = int(config.get("poll_interval", 5) or 5)
         self._transfer_type = config.get("transfer_type", "move")
         self._api_interval = int(config.get("api_interval", 0) or 0)
 
@@ -172,13 +168,8 @@ class Transfer115(_PluginBase):
                 else:
                     logger.warning("Transfer115: 链接已填写但115未授权或Cookie无效")
 
-        # 处理立即执行
-        onlyonce = config.get("onlyonce", False)
-        if onlyonce:
-            self.__check_and_organize()
-
-        # 清空 link_input 和 onlyonce
-        if link_input or onlyonce:
+        # 清空 link_input
+        if link_input:
             self.update_config({
                 "enabled": self._enabled,
                 "notify_enabled": self._notify_enabled,
@@ -187,10 +178,8 @@ class Transfer115(_PluginBase):
                 "download_path": self._download_path,
                 "fail_path": self._fail_path,
                 "library_path": self._library_path,
-                "poll_interval": self._poll_interval,
                 "transfer_type": self._transfer_type,
                 "api_interval": self._api_interval,
-                "onlyonce": False,
                 "link_input": ""
             })
 
@@ -203,13 +192,6 @@ class Transfer115(_PluginBase):
 
     def get_api(self) -> List[Dict[str, Any]]:
         return [
-            {
-                "path": "/refresh_tasks",
-                "endpoint": self.api_refresh_tasks,
-                "methods": ["GET"],
-                "auth": "bear",
-                "summary": "手动触发115离线任务检查"
-            },
             {
                 "path": "/list_dirs",
                 "endpoint": self.api_list_dirs,
@@ -261,19 +243,6 @@ class Transfer115(_PluginBase):
             }
         ]
 
-    def api_refresh_tasks(self) -> dict:
-        """手动触发任务检查"""
-        if not self._enabled:
-            return {"code": 1, "msg": "插件未启用"}
-        if self._auth_mode == "cookie":
-            oper = self._get_cookie_oper()
-        else:
-            oper = self._get_u115_oper()
-        if not oper:
-            return {"code": 1, "msg": "115网盘未授权或Cookie无效"}
-        self.__check_and_organize()
-        return {"code": 0, "msg": "任务检查已触发"}
-
     def api_list_dirs(self, path: str = "/") -> dict:
         """列出115目录"""
         if self._auth_mode == "cookie":
@@ -305,10 +274,8 @@ class Transfer115(_PluginBase):
             "download_path": self._download_path,
             "fail_path": self._fail_path,
             "library_path": self._library_path,
-            "poll_interval": self._poll_interval,
             "transfer_type": self._transfer_type,
             "api_interval": self._api_interval,
-            "onlyonce": False,
             "link_input": ""
         }
         conf[field] = clean_path
@@ -369,8 +336,6 @@ class Transfer115(_PluginBase):
                 if len(folders) >= 200:
                     truncated = True
                     logger.warning(f"Transfer115: Cookie模式子文件夹列表已达上限200个，可能不完整")
-            self.save_data("folder_list_cache", folders)
-            self.save_data("folder_list_truncated", truncated)
             result = {"code": 0, "folders": folders}
             if truncated:
                 result["warning"] = "Cookie模式仅显示前200个子文件夹，列表可能不完整"
@@ -576,27 +541,13 @@ class Transfer115(_PluginBase):
                             }
                         ]
                     },
-                    # 行5：参数配置（含立即检查一次开关）
+                    # 行5：参数配置
                     {
                         "component": "VRow",
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 3},
-                                "content": [
-                                    {
-                                        "component": "VTextField",
-                                        "props": {
-                                            "model": "poll_interval",
-                                            "label": "轮询间隔(分钟)",
-                                            "placeholder": "5"
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 3},
+                                "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
                                         "component": "VSelect",
@@ -613,22 +564,7 @@ class Transfer115(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 3},
-                                "content": [
-                                    {
-                                        "component": "VSwitch",
-                                        "props": {
-                                            "model": "onlyonce",
-                                            "label": "立即检查一次",
-                                            "hint": "保存后立即执行一次",
-                                            "persistent-hint": True
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 3},
+                                "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -722,11 +658,9 @@ class Transfer115(_PluginBase):
             "notify_enabled": False,
             "auth_mode": "mp_oauth",
             "cookie": "",
-            "onlyonce": False,
             "download_path": "",
             "library_path": "",
             "fail_path": "",
-            "poll_interval": 5,
             "transfer_type": "move",
             "api_interval": 0,
             "link_input": ""
@@ -888,18 +822,18 @@ class Transfer115(_PluginBase):
             ]
         }
 
-        # SECTION B2: Download folder list for manual organize (lazy-loaded via cache)
+        # SECTION B2: Download folder list for manual organize
         if self._enabled and self._download_path:
-            folder_list = self.get_data("folder_list_cache")
-            folder_cache_loaded = folder_list is not None
-            folder_truncated = self.get_data("folder_list_truncated") or False
+            folder_result = self.api_list_download_folders()
+            folder_list = folder_result.get("folders", [])
+            folder_error = folder_result.get("msg") if folder_result.get("code") != 0 else None
 
             folder_rows = []
-            if not folder_cache_loaded:
+            if folder_error:
                 folder_rows.append({
-                    "component": "div",
-                    "text": "点击「刷新列表」加载下载目录中的子文件夹",
-                    "props": {"class": "text-caption text-center pa-2"}
+                    "component": "VAlert",
+                    "props": {"type": "warning", "variant": "tonal", "density": "compact",
+                              "text": f"获取文件夹列表失败: {folder_error}"}
                 })
             elif not folder_list:
                 folder_rows.append({
@@ -929,7 +863,7 @@ class Transfer115(_PluginBase):
                                             "click": {
                                                 "api": "plugin/Transfer115/organize_folder",
                                                 "method": "get",
-                                                "params": {"folder_path": folder["path"], "fileid": folder["fileid"] or ""}
+                                                "params": {"folder_path": folder["path"], "fileid": folder.get("fileid") or ""}
                                             }
                                         }
                                     }
@@ -938,25 +872,11 @@ class Transfer115(_PluginBase):
                         ]
                     })
 
-            folder_list_content = [
-                {
-                    "component": "VList",
-                    "props": {"lines": "two", "density": "compact"},
-                    "content": folder_rows
-                }
-            ] if (folder_cache_loaded and folder_list) else folder_rows
-
-            truncation_warning_content = []
-            if folder_truncated:
-                truncation_warning_content.append({
-                    "component": "VAlert",
-                    "props": {
-                        "type": "warning",
-                        "variant": "tonal",
-                        "density": "compact",
-                        "text": "Cookie模式仅显示前200个子文件夹，列表可能不完整"
-                    }
-                })
+            folder_list_content = [{
+                "component": "VList",
+                "props": {"lines": "two", "density": "compact"},
+                "content": folder_rows
+            }] if folder_list else folder_rows
 
             download_folders_section = {
                 "component": "VCard",
@@ -980,17 +900,6 @@ class Transfer115(_PluginBase):
                                         "content": [
                                             {
                                                 "component": "VBtn",
-                                                "props": {"size": "x-small", "variant": "tonal", "color": "secondary"},
-                                                "text": "刷新列表",
-                                                "events": {
-                                                    "click": {
-                                                        "api": "plugin/Transfer115/list_download_folders",
-                                                        "method": "get"
-                                                    }
-                                                }
-                                            },
-                                            {
-                                                "component": "VBtn",
                                                 "props": {"size": "x-small", "variant": "tonal", "color": "success"},
                                                 "text": "一键全部整理",
                                                 "events": {
@@ -1004,7 +913,7 @@ class Transfer115(_PluginBase):
                                     }
                                 ]
                             }
-                        ] + truncation_warning_content + folder_list_content
+                        ] + folder_list_content
                     }
                 ]
             }
@@ -1262,22 +1171,7 @@ class Transfer115(_PluginBase):
                     "content": [
                         {
                             "component": "VBtn",
-                            "props": {
-                                "color": "primary",
-                                "variant": "tonal",
-                                "size": "small"
-                            },
-                            "text": "刷新任务状态",
-                            "events": {
-                                "click": {
-                                    "api": "plugin/Transfer115/refresh_tasks",
-                                    "method": "get"
-                                }
-                            }
-                        },
-                        {
-                            "component": "VBtn",
-                            "props": {"color": "error", "variant": "tonal", "size": "small", "class": "ml-2"},
+                            "props": {"color": "error", "variant": "tonal", "size": "small"},
                             "text": "清空任务记录",
                             "events": {
                                 "click": {
@@ -1301,207 +1195,10 @@ class Transfer115(_PluginBase):
         ] if c is not None]
 
     def get_service(self) -> List[Dict[str, Any]]:
-        if self._enabled and self._download_path:
-            return [
-                {
-                    "id": "Transfer115Monitor",
-                    "name": "115离线整理监控",
-                    "trigger": IntervalTrigger(minutes=self._poll_interval),
-                    "func": self.__check_and_organize,
-                    "kwargs": {}
-                }
-            ]
         return []
 
     def stop_service(self):
         pass
-
-    def __check_and_organize(self):
-        """轮询115离线任务，对已完成的任务执行整理"""
-        if self._auth_mode == "cookie":
-            oper = self._get_cookie_oper()
-        else:
-            oper = self._get_u115_oper()
-        if not oper:
-            logger.warning("Transfer115: 115未授权，跳过任务检查")
-            return
-        try:
-            if self._auth_mode == "cookie":
-                self._sleep_if_needed()
-                resp = oper.offline_list({"page": 1})
-            else:
-                self._sleep_if_needed()
-                resp = oper._request_api("GET", "/open/offline/get_task_list", params={"page": 1})
-            tasks = (resp or {}).get("data", {}).get("tasks", [])
-            # processed_tasks: list of task IDs that completed successfully and need no
-            # further action.
-            processed = self.get_data("processed_tasks") or []
-            # failed_tasks: dict of {task_id: retry_count} tracking transient failures.
-            # Tasks are retried up to _MAX_TASK_RETRIES times before being permanently
-            # skipped, preventing a broken task from blocking the poll loop forever.
-            _MAX_TASK_RETRIES = 3
-            failed_tasks: dict = self.get_data("failed_tasks") or {}
-            # download_done_tasks: set of task IDs that have been marked "下载完成" but
-            # not yet organized. Organizing is deferred to the next poll cycle so that
-            # the "下载完成" status is visible to the user for at least one interval.
-            download_done: set = set(self.get_data("download_done_tasks") or [])
-            changed = False
-
-            for task in tasks:
-                task_id = task.get("info_hash") or task.get("hash", "")
-                if not task_id:
-                    continue
-
-                task_name = task.get("name", task_id)
-                task_status = task.get("status", 0)
-
-                # 已成功整理的任务优先跳过，避免状态被反向覆写为"下载中"
-                if task_id in processed:
-                    continue
-
-                if task_status != 2:
-                    # 未完成
-                    self.__upsert_task_record(task_name, "下载中")
-                    continue
-
-                # Check if this task has exhausted its retries
-                retry_count = failed_tasks.get(task_id, 0)
-                if retry_count >= _MAX_TASK_RETRIES:
-                    # Already logged on the run that hit the limit; silently skip.
-                    continue
-
-                # 仅处理保存在指定下载目录下的任务
-                # 未设置下载目录，一律跳过
-                if not self._download_path:
-                    logger.debug(f"Transfer115: 跳过任务 '{task_name}'，未设置下载目录")
-                    continue
-                task_file_path = task.get("file_path", "").strip("/")
-                expected_prefix = self._download_path.strip("/")
-                if task_file_path and not task_file_path.startswith(expected_prefix):
-                    logger.debug(
-                        f"Transfer115: 跳过任务 '{task_name}'，"
-                        f"保存路径 '/{task_file_path}' 不在下载目录 '{self._download_path}' 下"
-                    )
-                    continue
-                # task_file_path 为空时，说明路径尚未填充，按下载目录+任务名构造路径，继续处理
-                if not task_file_path:
-                    logger.debug(f"Transfer115: 任务 '{task_name}' 路径为空，将使用下载目录+任务名构造路径")
-
-                # 两阶段处理：
-                # 第一次轮询到 status=2 时只写"下载完成"，等下次轮询再整理，
-                # 确保用户至少能看到一个轮询周期的"下载完成"状态。
-                if task_id not in download_done:
-                    logger.info(f"Transfer115: 任务下载完成，等待下次轮询整理: {task_name}")
-                    self.__upsert_task_record(task_name, "下载完成")
-                    download_done.add(task_id)
-                    self.save_data("download_done_tasks", list(download_done))
-                    continue
-
-                # 已经过一个轮询周期，现在执行整理
-                logger.info(f"Transfer115: 开始整理任务: {task_name}")
-                success = self.__organize_task(task, task_name, oper)
-                changed = True
-
-                # 整理完成后从 download_done 移除
-                download_done.discard(task_id)
-
-                if success:
-                    # Full success: permanently mark as processed and remove from
-                    # failed_tasks if it was there from an earlier partial attempt.
-                    processed.append(task_id)
-                    failed_tasks.pop(task_id, None)
-                    self.__upsert_task_record(task_name, "整理完成")
-                else:
-                    # Failure: increment retry counter. Do NOT add to processed so the
-                    # task will be retried on the next poll cycle.
-                    new_count = retry_count + 1
-                    failed_tasks[task_id] = new_count
-                    self.__upsert_task_record(task_name, "整理失败")
-                    if new_count >= _MAX_TASK_RETRIES:
-                        logger.warning(
-                            f"Transfer115: 任务 '{task_name}' 已失败 {new_count} 次，"
-                            "不再重试，已归档"
-                        )
-                        # On exhaustion: attempt fail-path move and notify user
-                        if self._fail_path and task.get("file_id"):
-                            self.__move_folder_to_fail(task, task_name, oper)
-                        elif self._notify_enabled:
-                            self.post_message(
-                                mtype=NotificationType.Manual,
-                                title="115整理放弃",
-                                text=f"❌ 任务: {task_name}\n已失败 {new_count} 次，不再重试，请手动处理"
-                            )
-                        # Mark as permanently processed so it doesn't re-enter the loop
-                        processed.append(task_id)
-                        failed_tasks.pop(task_id, None)
-
-            if changed:
-                self.save_data("processed_tasks", processed)
-                self.save_data("failed_tasks", failed_tasks)
-                self.save_data("download_done_tasks", list(download_done))
-
-        except Exception as e:
-            logger.error(f"Transfer115: 任务检查异常: {e}")
-
-    def __organize_task(self, task: dict, task_name: str, oper) -> bool:
-        """对已完成的离线任务进行媒体识别和整理（使用115云盘在线整理）"""
-        try:
-            from app.chain.transfer import TransferChain
-
-            file_id = task.get("file_id", "")
-            if not file_id:
-                logger.warning(f"Transfer115: 任务 '{task_name}' 无 file_id，无法整理")
-                return False
-
-            # 构造任务文件夹的云盘路径
-            task_file_path = task.get("file_path", "").strip("/")
-            if task_file_path:
-                cloud_folder_path = Path("/" + task_file_path)
-            else:
-                cloud_folder_path = Path(self._download_path.rstrip("/") + "/" + task_name)
-
-            logger.info(f"Transfer115: 开始整理任务文件夹: {cloud_folder_path} (file_id={file_id})")
-
-            transfer_kwargs = dict(
-                storage="u115",
-                in_path=cloud_folder_path,
-                fileid=str(file_id),
-                filetype="dir",
-                transfer_type=self._transfer_type,
-            )
-            if self._library_path:
-                transfer_kwargs["target"] = Path(self._library_path)
-
-            state, errmsg = TransferChain().manual_transfer(**transfer_kwargs)
-
-            if state:
-                logger.info(f"Transfer115: 整理成功: {task_name}")
-                if self._notify_enabled:
-                    self.post_message(
-                        mtype=NotificationType.Organize,
-                        title="115离线整理完成",
-                        text=f"✅ {task_name} 已整理入库"
-                    )
-                return True
-            else:
-                logger.warning(f"Transfer115: 整理失败: {task_name}，原因: {errmsg}")
-                if self._notify_enabled:
-                    self.post_message(
-                        mtype=NotificationType.Manual,
-                        title="115整理失败",
-                        text=f"❌ 任务: {task_name}\n原因: {errmsg}\n将在下次检查时重试"
-                    )
-                return False
-
-        except Exception as e:
-            logger.error(f"Transfer115: 整理任务 '{task_name}' 异常: {e}")
-            if self._notify_enabled:
-                self.post_message(
-                    mtype=NotificationType.Manual,
-                    title="115整理异常",
-                    text=f"❌ 任务: {task_name}\n错误: {e}"
-                )
-            return False
 
     def _get_folder_id_by_path_cookie(self, path: str, oper) -> Optional[int]:
         """Walk path to get folder id for cookie mode.
@@ -1533,89 +1230,6 @@ class Transfer115(_PluginBase):
         except Exception as e:
             logger.warning(f"Transfer115: cookie模式获取目录ID失败: {e}")
             return None
-
-    def __move_folder_to_fail(self, task: dict, task_name: str, oper):
-        """将整个任务文件夹移动到整理失败目录"""
-        try:
-            folder_id = task.get("file_id", "")
-            if not folder_id:
-                logger.warning(f"Transfer115: 无法获取任务文件夹ID，跳过移动: {task_name}")
-                return
-
-            if self._auth_mode == "cookie":
-                # Cookie mode: use p115client fs_move
-                fail_folder_id = self._get_folder_id_by_path_cookie(self._fail_path, oper)
-                if fail_folder_id is None:
-                    logger.warning(f"Transfer115: cookie模式无法找到失败目录: {self._fail_path}")
-                    if self._notify_enabled:
-                        self.post_message(
-                            mtype=NotificationType.Manual,
-                            title="115整理失败",
-                            text=f"❌ 任务: {task_name}\n整理失败，请手动移至: {self._fail_path}"
-                        )
-                    return
-                self._sleep_if_needed()
-                oper.fs_move([int(folder_id)], pid=fail_folder_id)
-                logger.info(f"Transfer115: 已将失败任务 '{task_name}' 的文件夹移至: {self._fail_path}")
-                if self._notify_enabled:
-                    self.post_message(
-                        mtype=NotificationType.Manual,
-                        title="115整理失败-已归档",
-                        text=f"❌ 任务: {task_name}\n文件夹已移至失败目录: {self._fail_path}"
-                    )
-            else:
-                # MP OAuth mode: use U115Pan helpers
-                try:
-                    fail_item = oper.get_folder(Path(self._fail_path))
-                except Exception as e:
-                    logger.warning(f"Transfer115: 获取失败目录失败: {e}")
-                    fail_item = None
-
-                if not fail_item:
-                    logger.warning(f"Transfer115: 无法获取失败目录: {self._fail_path}")
-                    if self._notify_enabled:
-                        self.post_message(
-                            mtype=NotificationType.Manual,
-                            title="115整理失败",
-                            text=f"❌ 任务: {task_name}\n整理失败，请手动移至: {self._fail_path}"
-                        )
-                    return
-
-                # Try to get file_path from task first, else construct
-                task_file_path = task.get("file_path", "").strip("/")
-                if task_file_path:
-                    task_folder_path = "/" + task_file_path
-                else:
-                    task_folder_path = self._download_path.rstrip("/") + "/" + task_name
-
-                try:
-                    task_item = oper.get_item(Path(task_folder_path))
-                except Exception as e:
-                    logger.warning(f"Transfer115: 获取任务文件夹失败: {e}")
-                    task_item = None
-
-                if not task_item:
-                    logger.warning(f"Transfer115: 无法获取任务文件夹，跳过移动: {task_name}")
-                    if self._notify_enabled:
-                        self.post_message(
-                            mtype=NotificationType.Manual,
-                            title="115整理失败",
-                            text=f"❌ 任务: {task_name}\n整理失败，请手动移至: {self._fail_path}"
-                        )
-                    return
-
-                self._sleep_if_needed()
-                oper.move(task_item, Path(self._fail_path), task_item.name)
-                logger.info(f"Transfer115: 已将失败任务 '{task_name}' 的文件夹移至: {self._fail_path}")
-                if self._notify_enabled:
-                    self.post_message(
-                        mtype=NotificationType.Manual,
-                        title="115整理失败-已归档",
-                        text=f"❌ 任务: {task_name}\n文件夹已移至失败目录: {self._fail_path}"
-                    )
-
-        except Exception as e:
-            logger.error(f"Transfer115: 移动失败目录异常 ({task_name}): {e}")
 
     def __upsert_task_record(self, name: str, status: str):
         """更新或插入任务记录"""
