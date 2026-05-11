@@ -19,7 +19,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.14"
+    plugin_version = "3.15"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -168,8 +168,15 @@ class Transfer115(_PluginBase):
                 else:
                     logger.warning("Transfer115: 链接已填写但115未授权或Cookie无效")
 
-        # 清空 link_input
-        if link_input:
+        # 处理批量重命名
+        rename_find = config.get("rename_find", "").strip()
+        rename_replace = config.get("rename_replace", "")
+        if rename_find:
+            result = self.api_batch_rename(find=rename_find, replace=rename_replace)
+            logger.info(f"Transfer115: 批量重命名结果: {result.get('msg', '')}")
+
+        # 清空 link_input 和 rename 字段
+        if link_input or rename_find:
             self.update_config({
                 "enabled": self._enabled,
                 "notify_enabled": self._notify_enabled,
@@ -180,7 +187,9 @@ class Transfer115(_PluginBase):
                 "library_path": self._library_path,
                 "transfer_type": self._transfer_type,
                 "api_interval": self._api_interval,
-                "link_input": ""
+                "link_input": "",
+                "rename_find": "",
+                "rename_replace": ""
             })
 
     def get_state(self) -> bool:
@@ -240,6 +249,13 @@ class Transfer115(_PluginBase):
                 "methods": ["GET"],
                 "auth": "bear",
                 "summary": "一键整理所有文件夹"
+            },
+            {
+                "path": "/batch_rename",
+                "endpoint": self.api_batch_rename,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "批量重命名文件"
             }
         ]
 
@@ -406,6 +422,83 @@ class Transfer115(_PluginBase):
             self._sleep_if_needed()
         code = 1 if success_count == 0 and fail_count > 0 else 0
         return {"code": code, "msg": f"整理完成：成功 {success_count} 个，失败 {fail_count} 个"}
+
+    def api_batch_rename(self, find: str = "", replace: str = "") -> dict:
+        """批量重命名下载目录中的文件和文件夹"""
+        if not find:
+            return {"code": 1, "msg": "未指定查找关键词"}
+        if not self._download_path:
+            return {"code": 1, "msg": "未设置下载目录"}
+
+        try:
+            if self._auth_mode == "mp_oauth":
+                oper = self._get_u115_oper()
+                if not oper:
+                    return {"code": 1, "msg": "115未授权"}
+
+                from app.chain.storage import StorageChain
+                from app.schemas import FileItem
+                path = self._download_path if self._download_path.endswith("/") else self._download_path + "/"
+                fileitem = FileItem(storage="u115", path=path, type="dir")
+                self._sleep_if_needed()
+                items = StorageChain().list_files(fileitem) or []
+
+                renamed_count = 0
+                failed_count = 0
+                for item in items:
+                    if find in item.name:
+                        new_name = item.name.replace(find, replace)
+                        if new_name and new_name != item.name:
+                            try:
+                                self._sleep_if_needed()
+                                oper._request_api("POST", "/open/ufile/update", data={"fid": int(item.fileid), "file_name": new_name})
+                                renamed_count += 1
+                                logger.info(f"Transfer115: 重命名成功: {item.name} -> {new_name}")
+                            except Exception as e:
+                                failed_count += 1
+                                logger.warning(f"Transfer115: 重命名失败: {item.name} -> {new_name}, 错误: {e}")
+
+                if renamed_count == 0 and failed_count == 0:
+                    return {"code": 0, "msg": f"未找到包含「{find}」的文件"}
+                return {"code": 0, "msg": f"重命名完成：成功 {renamed_count} 个，失败 {failed_count} 个"}
+
+            else:  # cookie mode
+                oper = self._get_cookie_oper()
+                if not oper:
+                    return {"code": 1, "msg": "Cookie客户端初始化失败"}
+                folder_id = self._get_folder_id_by_path_cookie(self._download_path, oper)
+                if folder_id is None:
+                    return {"code": 1, "msg": "无法找到下载目录"}
+
+                self._sleep_if_needed()
+                resp = oper.fs_files({"cid": folder_id, "limit": 1000})
+                items = resp.get("data", [])
+
+                renamed_count = 0
+                failed_count = 0
+                for item in items:
+                    name = item.get("n", "")
+                    if find in name:
+                        new_name = name.replace(find, replace)
+                        if new_name and new_name != name:
+                            try:
+                                self._sleep_if_needed()
+                                file_id = item.get("fid") or item.get("cid")
+                                if file_id:
+                                    oper.fs_rename({int(file_id): new_name})
+                                    renamed_count += 1
+                                    logger.info(f"Transfer115: 重命名成功: {name} -> {new_name}")
+                            except Exception as e:
+                                failed_count += 1
+                                logger.warning(f"Transfer115: 重命名失败: {name} -> {new_name}, 错误: {e}")
+
+                if renamed_count == 0 and failed_count == 0:
+                    return {"code": 0, "msg": f"未找到包含「{find}」的文件"}
+                return {"code": 0, "msg": f"重命名完成：成功 {renamed_count} 个，失败 {failed_count} 个"}
+
+        except Exception as e:
+            logger.error(f"Transfer115: 批量重命名异常: {e}")
+            return {"code": 1, "msg": str(e)}
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
@@ -592,6 +685,57 @@ class Transfer115(_PluginBase):
                             }
                         ]
                     },
+                    # 行5.5：批量重命名
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 5},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "rename_find",
+                                            "label": "批量重命名 - 查找",
+                                            "placeholder": "输入要查找的文件名关键词",
+                                            "hint": "保存后将自动对下载目录中文件名包含此关键词的文件/文件夹执行重命名",
+                                            "persistent-hint": True
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 5},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "rename_replace",
+                                            "label": "批量重命名 - 替换为",
+                                            "placeholder": "替换后的内容（留空则删除匹配文本）"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 2},
+                                "content": [
+                                    {
+                                        "component": "VAlert",
+                                        "props": {
+                                            "type": "info",
+                                            "variant": "tonal",
+                                            "density": "compact",
+                                            "text": "保存生效"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
                     # 行6：添加离线下载链接
                     {
                         "component": "VRow",
@@ -675,7 +819,9 @@ class Transfer115(_PluginBase):
             "fail_path": "",
             "transfer_type": "move",
             "api_interval": 0,
-            "link_input": ""
+            "link_input": "",
+            "rename_find": "",
+            "rename_replace": ""
         }
 
     def get_page(self) -> List[dict]:
