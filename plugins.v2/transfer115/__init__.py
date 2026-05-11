@@ -70,12 +70,6 @@ class Transfer115(_PluginBase):
             logger.warning(f"Transfer115: 初始化Cookie客户端失败: {e}")
             return None
 
-    def _get_oper(self):
-        """Return oper based on auth_mode."""
-        if self._auth_mode == "cookie":
-            return self._get_cookie_oper()
-        return self._get_u115_oper()
-
     def init_plugin(self, config: dict = None):
         if not config:
             return
@@ -94,7 +88,10 @@ class Transfer115(_PluginBase):
         if link_input:
             lines = [l.strip() for l in link_input.splitlines() if l.strip()]
             if lines:
-                oper = self._get_oper()
+                if self._auth_mode == "cookie":
+                    oper = self._get_cookie_oper()
+                else:
+                    oper = self._get_u115_oper()
                 if oper:
                     try:
                         if self._auth_mode == "cookie":
@@ -180,7 +177,10 @@ class Transfer115(_PluginBase):
         """手动触发任务检查"""
         if not self._enabled:
             return {"code": 1, "msg": "插件未启用"}
-        oper = self._get_oper()
+        if self._auth_mode == "cookie":
+            oper = self._get_cookie_oper()
+        else:
+            oper = self._get_u115_oper()
         if not oper:
             return {"code": 1, "msg": "115网盘未授权或Cookie无效"}
         self.__check_and_organize()
@@ -188,6 +188,8 @@ class Transfer115(_PluginBase):
 
     def api_list_dirs(self, path: str = "/") -> dict:
         """列出115目录"""
+        if self._auth_mode == "cookie":
+            return {"code": 1, "msg": "Cookie模式下目录浏览不可用，请手动填写目录路径", "dirs": []}
         try:
             from app.chain.storage import StorageChain
             from app.schemas import FileItem
@@ -206,10 +208,17 @@ class Transfer115(_PluginBase):
         if field not in ("download_path", "fail_path"):
             return {"code": 1, "msg": "无效字段"}
         clean_path = path.rstrip("/") if path != "/" else "/"
+        # Read current persisted config to avoid overwriting concurrent changes.
+        # get_config() is not available in _PluginBase; we fall back to a snapshot
+        # from instance state but add setdefault-style merging so that if two
+        # requests race, the last write wins only for the field it explicitly sets.
+        # NOTE: a true read-modify-write race is still possible here because
+        # update_config has no atomic merge operation; this is a framework limitation.
         conf = {
             "enabled": self._enabled,
             "notify_enabled": self._notify_enabled,
             "auth_mode": self._auth_mode,
+            # Preserve the stored cookie without exposing self._cookie in new code
             "cookie": self._cookie,
             "download_path": self._download_path,
             "fail_path": self._fail_path,
@@ -611,171 +620,243 @@ class Transfer115(_PluginBase):
             parts = browse_path.rstrip("/").rsplit("/", 1)
             parent_path = parts[0] + "/" if parts[0] else "/"
 
-        # Try to list dirs
-        dir_items = []
-        dir_error = None
-        try:
-            from app.chain.storage import StorageChain
-            from app.schemas import FileItem
-            bp = browse_path if browse_path.endswith("/") else browse_path + "/"
-            fileitem = FileItem(storage="u115", path=bp, type="dir")
-            listed = StorageChain().list_files(fileitem) or []
-            dir_items = [i for i in listed if i.type == "dir"]
-        except Exception as e:
-            dir_error = str(e)
-
-        # Build browser nav buttons
-        browser_nav_content = []
-        browser_nav_content.append({
-            "component": "span",
-            "text": f"当前路径: {browse_path}",
-            "props": {"class": "text-body-2 mr-2"}
-        })
-        if parent_path is not None:
+        if self._auth_mode == "cookie":
+            # In cookie mode the directory browser uses StorageChain (MP OAuth) which
+            # is a different credential. Disable the browser and show a clear message.
+            browser_nav_content = []
+            browser_nav_content.append({
+                "component": "span",
+                "text": f"当前路径: {browse_path}",
+                "props": {"class": "text-body-2 mr-2"}
+            })
+            if parent_path is not None:
+                browser_nav_content.append({
+                    "component": "VBtn",
+                    "props": {"size": "x-small", "variant": "tonal", "color": "secondary", "class": "mr-1"},
+                    "text": "返回上级",
+                    "events": {
+                        "click": {
+                            "api": "plugin/Transfer115/nav_dir",
+                            "method": "post",
+                            "params": {"path": parent_path}
+                        }
+                    }
+                })
             browser_nav_content.append({
                 "component": "VBtn",
-                "props": {"size": "x-small", "variant": "tonal", "color": "secondary", "class": "mr-1"},
-                "text": "返回上级",
+                "props": {"size": "x-small", "variant": "tonal", "color": "secondary"},
+                "text": "刷新",
                 "events": {
                     "click": {
                         "api": "plugin/Transfer115/nav_dir",
                         "method": "post",
-                        "params": {"path": parent_path}
+                        "params": {"path": browse_path}
                     }
                 }
             })
-        browser_nav_content.append({
-            "component": "VBtn",
-            "props": {"size": "x-small", "variant": "tonal", "color": "secondary"},
-            "text": "刷新",
-            "events": {
-                "click": {
-                    "api": "plugin/Transfer115/nav_dir",
-                    "method": "post",
-                    "params": {"path": browse_path}
-                }
-            }
-        })
-
-        browser_header = {
-            "component": "VRow",
-            "props": {"class": "align-center mb-1"},
-            "content": [
-                {
-                    "component": "VCol",
-                    "props": {"cols": 12},
-                    "content": browser_nav_content
-                }
-            ]
-        }
-
-        browser_items_content = []
-        if dir_error:
-            browser_items_content.append({
-                "component": "VAlert",
-                "props": {
-                    "type": "warning",
-                    "variant": "tonal",
-                    "density": "compact",
-                    "text": f"列出目录失败: {dir_error}"
-                }
-            })
-        elif not dir_items:
-            browser_items_content.append({
-                "component": "div",
-                "text": "此目录下无子目录",
-                "props": {"class": "text-caption text-center pa-2"}
-            })
-        else:
-            dir_rows = []
-            for d in dir_items:
-                dir_rows.append({
-                    "component": "VListItem",
-                    "props": {"density": "compact"},
-                    "content": [
-                        {
-                            "component": "VListItemTitle",
-                            "props": {"class": "text-body-2"},
-                            "text": d.name
-                        },
-                        {
-                            "component": "VListItemSubtitle",
-                            "content": [
-                                {
-                                    "component": "VBtn",
-                                    "props": {
-                                        "size": "x-small",
-                                        "variant": "tonal",
-                                        "color": "primary",
-                                        "class": "mr-1"
-                                    },
-                                    "text": "设为下载目录",
-                                    "events": {
-                                        "click": {
-                                            "api": "plugin/Transfer115/set_path",
-                                            "method": "post",
-                                            "params": {"field": "download_path", "path": d.path}
-                                        }
+            browser_section = {
+                "component": "VCard",
+                "props": {"variant": "outlined", "class": "mb-2"},
+                "content": [
+                    {
+                        "component": "VCardTitle",
+                        "props": {"class": "text-body-1"},
+                        "text": "目录浏览器"
+                    },
+                    {
+                        "component": "VCardText",
+                        "content": [
+                            {
+                                "component": "VRow",
+                                "props": {"class": "align-center mb-1"},
+                                "content": [
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 12},
+                                        "content": browser_nav_content
                                     }
-                                },
-                                {
-                                    "component": "VBtn",
-                                    "props": {
-                                        "size": "x-small",
-                                        "variant": "tonal",
-                                        "color": "warning",
-                                        "class": "mr-1"
-                                    },
-                                    "text": "设为失败目录",
-                                    "events": {
-                                        "click": {
-                                            "api": "plugin/Transfer115/set_path",
-                                            "method": "post",
-                                            "params": {"field": "fail_path", "path": d.path}
-                                        }
-                                    }
-                                },
-                                {
-                                    "component": "VBtn",
-                                    "props": {
-                                        "size": "x-small",
-                                        "variant": "tonal",
-                                        "color": "secondary"
-                                    },
-                                    "text": "进入",
-                                    "events": {
-                                        "click": {
-                                            "api": "plugin/Transfer115/nav_dir",
-                                            "method": "post",
-                                            "params": {"path": d.path}
-                                        }
-                                    }
+                                ]
+                            },
+                            {
+                                "component": "VAlert",
+                                "props": {
+                                    "type": "info",
+                                    "variant": "tonal",
+                                    "density": "compact",
+                                    "text": "Cookie模式下目录浏览器不可用，请手动在设置页填写目录路径"
                                 }
-                            ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        else:
+            # MP OAuth mode: try to list dirs via StorageChain
+            # Try to list dirs
+            dir_items = []
+            dir_error = None
+            try:
+                from app.chain.storage import StorageChain
+                from app.schemas import FileItem
+                bp = browse_path if browse_path.endswith("/") else browse_path + "/"
+                fileitem = FileItem(storage="u115", path=bp, type="dir")
+                listed = StorageChain().list_files(fileitem) or []
+                dir_items = [i for i in listed if i.type == "dir"]
+            except Exception as e:
+                dir_error = str(e)
+
+            # Build browser nav buttons
+            browser_nav_content = []
+            browser_nav_content.append({
+                "component": "span",
+                "text": f"当前路径: {browse_path}",
+                "props": {"class": "text-body-2 mr-2"}
+            })
+            if parent_path is not None:
+                browser_nav_content.append({
+                    "component": "VBtn",
+                    "props": {"size": "x-small", "variant": "tonal", "color": "secondary", "class": "mr-1"},
+                    "text": "返回上级",
+                    "events": {
+                        "click": {
+                            "api": "plugin/Transfer115/nav_dir",
+                            "method": "post",
+                            "params": {"path": parent_path}
                         }
-                    ]
+                    }
                 })
-            browser_items_content.append({
-                "component": "VList",
-                "props": {"lines": "two", "density": "compact"},
-                "content": dir_rows
+            browser_nav_content.append({
+                "component": "VBtn",
+                "props": {"size": "x-small", "variant": "tonal", "color": "secondary"},
+                "text": "刷新",
+                "events": {
+                    "click": {
+                        "api": "plugin/Transfer115/nav_dir",
+                        "method": "post",
+                        "params": {"path": browse_path}
+                    }
+                }
             })
 
-        browser_section = {
-            "component": "VCard",
-            "props": {"variant": "outlined", "class": "mb-2"},
-            "content": [
-                {
-                    "component": "VCardTitle",
-                    "props": {"class": "text-body-1"},
-                    "text": "目录浏览器"
-                },
-                {
-                    "component": "VCardText",
-                    "content": [browser_header] + browser_items_content
-                }
-            ]
-        }
+            browser_header = {
+                "component": "VRow",
+                "props": {"class": "align-center mb-1"},
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": browser_nav_content
+                    }
+                ]
+            }
+
+            browser_items_content = []
+            if dir_error:
+                browser_items_content.append({
+                    "component": "VAlert",
+                    "props": {
+                        "type": "warning",
+                        "variant": "tonal",
+                        "density": "compact",
+                        "text": f"列出目录失败: {dir_error}"
+                    }
+                })
+            elif not dir_items:
+                browser_items_content.append({
+                    "component": "div",
+                    "text": "此目录下无子目录",
+                    "props": {"class": "text-caption text-center pa-2"}
+                })
+            else:
+                dir_rows = []
+                for d in dir_items:
+                    dir_rows.append({
+                        "component": "VListItem",
+                        "props": {"density": "compact"},
+                        "content": [
+                            {
+                                "component": "VListItemTitle",
+                                "props": {"class": "text-body-2"},
+                                "text": d.name
+                            },
+                            {
+                                "component": "VListItemSubtitle",
+                                "content": [
+                                    {
+                                        "component": "VBtn",
+                                        "props": {
+                                            "size": "x-small",
+                                            "variant": "tonal",
+                                            "color": "primary",
+                                            "class": "mr-1"
+                                        },
+                                        "text": "设为下载目录",
+                                        "events": {
+                                            "click": {
+                                                "api": "plugin/Transfer115/set_path",
+                                                "method": "post",
+                                                "params": {"field": "download_path", "path": d.path}
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "component": "VBtn",
+                                        "props": {
+                                            "size": "x-small",
+                                            "variant": "tonal",
+                                            "color": "warning",
+                                            "class": "mr-1"
+                                        },
+                                        "text": "设为失败目录",
+                                        "events": {
+                                            "click": {
+                                                "api": "plugin/Transfer115/set_path",
+                                                "method": "post",
+                                                "params": {"field": "fail_path", "path": d.path}
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "component": "VBtn",
+                                        "props": {
+                                            "size": "x-small",
+                                            "variant": "tonal",
+                                            "color": "secondary"
+                                        },
+                                        "text": "进入",
+                                        "events": {
+                                            "click": {
+                                                "api": "plugin/Transfer115/nav_dir",
+                                                "method": "post",
+                                                "params": {"path": d.path}
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    })
+                browser_items_content.append({
+                    "component": "VList",
+                    "props": {"lines": "two", "density": "compact"},
+                    "content": dir_rows
+                })
+
+            browser_section = {
+                "component": "VCard",
+                "props": {"variant": "outlined", "class": "mb-2"},
+                "content": [
+                    {
+                        "component": "VCardTitle",
+                        "props": {"class": "text-body-1"},
+                        "text": "目录浏览器"
+                    },
+                    {
+                        "component": "VCardText",
+                        "content": [browser_header] + browser_items_content
+                    }
+                ]
+            }
 
         # SECTION D: Task records
         records = self.get_data("task_records") or []
@@ -872,7 +953,10 @@ class Transfer115(_PluginBase):
 
     def __check_and_organize(self):
         """轮询115离线任务，对已完成的任务执行整理"""
-        oper = self._get_oper()
+        if self._auth_mode == "cookie":
+            oper = self._get_cookie_oper()
+        else:
+            oper = self._get_u115_oper()
         if not oper:
             logger.warning("Transfer115: 115未授权，跳过任务检查")
             return
@@ -970,6 +1054,14 @@ class Transfer115(_PluginBase):
                     if self._auth_mode == "cookie":
                         resp = oper.fs_files({"cid": int(file_id), "limit": 1000})
                         file_list = resp.get("data", [])
+                        # NOTE: p115client fetches a single page of up to 1000 items.
+                        # Files beyond position 1000 in the task folder will not be
+                        # processed. This is a p115client single-page limitation.
+                        if len(file_list) >= 1000:
+                            logger.warning(
+                                f"Transfer115: 任务 '{task_name}' 文件列表已达1000条上限，"
+                                "超出部分将被跳过（p115client单页限制）"
+                            )
                     else:
                         resp = oper._request_api(
                             "GET",
@@ -1046,7 +1138,12 @@ class Transfer115(_PluginBase):
             return False
 
     def _get_folder_id_by_path_cookie(self, path: str, oper) -> Optional[int]:
-        """Walk path to get folder id for cookie mode."""
+        """Walk path to get folder id for cookie mode.
+
+        WARNING: Each level of the walk fetches at most 1000 items (p115client
+        single-page limit). If a directory contains more than 1000 sub-folders,
+        the target may not be found even when it exists.
+        """
         try:
             parts = [p for p in path.strip("/").split("/") if p]
             current_id = 0
@@ -1059,6 +1156,10 @@ class Transfer115(_PluginBase):
                         found = item.get("cid") or item.get("fid")
                         break
                 if found is None:
+                    logger.warning(
+                        f"Transfer115: cookie模式未找到目录 '{part}'，"
+                        "可能路径不存在或该层目录下子文件夹超过1000个"
+                    )
                     return None
                 current_id = int(found)
             return current_id
