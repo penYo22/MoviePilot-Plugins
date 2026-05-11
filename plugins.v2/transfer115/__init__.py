@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app.core.meta import MetaVideo
 from app.log import logger
 from app.plugins import _PluginBase
 from app.schemas.types import NotificationType
@@ -22,7 +21,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.10"
+    plugin_version = "3.11"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -1205,102 +1204,54 @@ class Transfer115(_PluginBase):
             logger.error(f"Transfer115: 任务检查异常: {e}")
 
     def __organize_task(self, task: dict, task_name: str, oper) -> bool:
-        """对已完成的离线任务进行媒体识别和整理"""
-        any_failure = False
-        organized_count = 0
-
+        """对已完成的离线任务进行媒体识别和整理（使用115云盘在线整理）"""
         try:
+            from app.chain.transfer import TransferChain
+
             file_id = task.get("file_id", "")
-            file_list = []
-
-            if file_id:
-                try:
-                    if self._auth_mode == "cookie":
-                        self._sleep_if_needed()
-                        resp = oper.fs_files({"cid": int(file_id), "limit": 1000})
-                        file_list = resp.get("data", [])
-                        # NOTE: p115client fetches a single page of up to 1000 items.
-                        # Files beyond position 1000 in the task folder will not be
-                        # processed. This is a p115client single-page limitation.
-                        if len(file_list) >= 1000:
-                            logger.warning(
-                                f"Transfer115: 任务 '{task_name}' 文件列表已达1000条上限，"
-                                "超出部分将被跳过（p115client单页限制）"
-                            )
-                    else:
-                        self._sleep_if_needed()
-                        resp = oper._request_api(
-                            "GET",
-                            "/open/ufile/files",
-                            "data",
-                            params={"cid": int(file_id), "limit": 1000}
-                        )
-                        file_list = (resp or [])
-                except Exception as e:
-                    logger.warning(f"Transfer115: 获取任务文件列表失败: {e}")
-                    file_list = []
-
-            if not file_list:
-                # 尝试直接用任务文件夹路径
-                logger.warning(f"Transfer115: 未能获取任务 '{task_name}' 的文件列表")
+            if not file_id:
+                logger.warning(f"Transfer115: 任务 '{task_name}' 无 file_id，无法整理")
                 return False
 
-            for f in file_list:
-                fname = f.get("n", "")
-                if not fname:
-                    continue
-                if not any(fname.lower().endswith(ext) for ext in self._video_extensions):
-                    continue
+            # 构造任务文件夹的云盘路径
+            task_file_path = task.get("file_path", "").strip("/")
+            if task_file_path:
+                cloud_folder_path = Path("/" + task_file_path)
+            else:
+                cloud_folder_path = Path(self._download_path.rstrip("/") + "/" + task_name)
 
-                meta = MetaVideo(title=Path(fname).stem, isfile=True)
-                mediainfo = self.chain.recognize_media(meta=meta)
+            logger.info(f"Transfer115: 开始整理任务文件夹: {cloud_folder_path} (file_id={file_id})")
 
-                if not mediainfo:
-                    logger.warning(f"Transfer115: 识别失败: {fname}")
-                    any_failure = True
-                    continue
+            transfer_kwargs = dict(
+                storage="u115",
+                in_path=cloud_folder_path,
+                fileid=str(file_id),
+                filetype="dir",
+                transfer_type=self._transfer_type,
+            )
+            if self._library_path:
+                transfer_kwargs["target"] = Path(self._library_path)
 
-                # Prefer the actual file_path from the task; fall back to constructed path
-                task_file_path = task.get("file_path", "").strip("/")
-                if task_file_path:
-                    cloud_path = Path("/" + task_file_path) / fname
-                else:
-                    task_folder_path = self._download_path.rstrip("/") + "/" + task_name
-                    cloud_path = Path(task_folder_path) / fname
-                transfer_kwargs = dict(
-                    path=cloud_path,
-                    meta=meta,
-                    mediainfo=mediainfo,
-                    transfer_type=self._transfer_type,
-                )
-                if self._library_path:
-                    transfer_kwargs["target_path"] = Path(self._library_path)
-                result = self.chain.transfer(**transfer_kwargs)
+            state, errmsg = TransferChain().manual_transfer(**transfer_kwargs)
 
-                if result and result.success:
-                    organized_count += 1
-                    logger.info(f"Transfer115: 整理成功: {fname} -> {mediainfo.title}")
-                    if self._notify_enabled:
-                        self.post_message(
-                            mtype=NotificationType.Organize,
-                            title="115离线整理完成",
-                            text=f"✅ {fname}\n识别为: {mediainfo.title}"
-                        )
-                else:
-                    err_msg = getattr(result, 'message', '') if result else '整理链返回空'
-                    logger.warning(f"Transfer115: 整理失败: {fname}，原因: {err_msg}")
-                    any_failure = True
-
-            if any_failure:
-                logger.warning(f"Transfer115: 任务 '{task_name}' 部分文件整理失败，等待重试")
+            if state:
+                logger.info(f"Transfer115: 整理成功: {task_name}")
+                if self._notify_enabled:
+                    self.post_message(
+                        mtype=NotificationType.Organize,
+                        title="115离线整理完成",
+                        text=f"✅ {task_name} 已整理入库"
+                    )
+                return True
+            else:
+                logger.warning(f"Transfer115: 整理失败: {task_name}，原因: {errmsg}")
                 if self._notify_enabled:
                     self.post_message(
                         mtype=NotificationType.Manual,
                         title="115整理失败",
-                        text=f"❌ 任务: {task_name}\n部分文件整理失败，将在下次检查时重试"
+                        text=f"❌ 任务: {task_name}\n原因: {errmsg}\n将在下次检查时重试"
                     )
-
-            return organized_count > 0 and not any_failure
+                return False
 
         except Exception as e:
             logger.error(f"Transfer115: 整理任务 '{task_name}' 异常: {e}")
