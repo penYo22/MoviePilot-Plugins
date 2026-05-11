@@ -22,7 +22,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "3.6"
+    plugin_version = "3.7"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -121,6 +121,22 @@ class Transfer115(_PluginBase):
                                 data["wp_path_id"] = wp_path_id
                             oper._request_api("POST", "/open/offline/add_task_urls", data=data)
                         logger.info(f"Transfer115: 添加离线任务成功，共 {len(lines)} 条")
+                        # 提交成功后立即查询任务列表，将新任务写入记录
+                        try:
+                            if self._auth_mode == "cookie":
+                                list_resp = oper.offline_list({"page": 1})
+                            else:
+                                list_resp = oper._request_api("GET", "/open/offline/get_task_list", params={"page": 1})
+                            new_tasks = (list_resp or {}).get("data", {}).get("tasks", [])
+                            # Write any task that is not yet in records as "下载中"
+                            processed = self.get_data("processed_tasks") or []
+                            for t in new_tasks:
+                                t_name = t.get("name", "")
+                                t_id = t.get("info_hash") or t.get("hash", "")
+                                if t_name and t_id and t_id not in processed:
+                                    self.__upsert_task_record(t_name, "下载中")
+                        except Exception as list_err:
+                            logger.debug(f"Transfer115: 提交后查询任务列表失败（非致命）: {list_err}")
                         if self._notify_enabled:
                             self.post_message(
                                 mtype=NotificationType.Organize,
@@ -922,10 +938,12 @@ class Transfer115(_PluginBase):
             rows = []
             for entry in records:
                 status = entry.get("status", "")
-                if status == "整理成功":
-                    status_text = "✅ 整理成功"
+                if status == "整理完成":
+                    status_text = "✅ 整理完成"
                 elif status == "整理失败":
                     status_text = "❌ 整理失败"
+                elif status == "下载完成":
+                    status_text = "📥 下载完成"
                 else:
                     status_text = "⏳ 下载中"
                 rows.append({
@@ -1078,8 +1096,9 @@ class Transfer115(_PluginBase):
                     )
                     continue
 
-                # 已完成且未处理
+                # 已完成且未处理 — 先标记下载完成，再整理
                 logger.info(f"Transfer115: 发现已完成任务: {task_name}")
+                self.__upsert_task_record(task_name, "下载完成")
                 success = self.__organize_task(task, task_name, oper)
                 changed = True
 
@@ -1088,7 +1107,7 @@ class Transfer115(_PluginBase):
                     # failed_tasks if it was there from an earlier partial attempt.
                     processed.append(task_id)
                     failed_tasks.pop(task_id, None)
-                    self.__upsert_task_record(task_name, "整理成功")
+                    self.__upsert_task_record(task_name, "整理完成")
                 else:
                     # Failure: increment retry counter. Do NOT add to processed so the
                     # task will be retried on the next poll cycle.
