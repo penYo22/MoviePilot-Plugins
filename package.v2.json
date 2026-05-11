@@ -3,7 +3,7 @@
         "name": "115离线下载",
         "description": "⚠️ 未经测试，封号自理。添加115离线下载任务，支持磁力/ed2k/115分享链接",
         "labels": "115,离线下载,云盘",
-        "version": "4.0",
+        "version": "4.1",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "penYo22",
         "level": 1,
@@ -11,7 +11,8 @@
             "v1.0": "初始版本：115 Cookie登录、离线下载添加、自动识别整理、失败归档",
             "v2.0": "使用MP OAuth授权替换Cookie模式",
             "v3.0": "双授权模式（MP OAuth + Cookie），可视化目录选择器",
-            "v4.0": "精简为纯离线下载插件：配置下载目录，添加离线链接"
+            "v4.0": "精简为纯离线下载插件：配置下载目录，添加离线链接",
+            "v4.1": "新增目录浏览器：数据页可视化浏览115目录并设置下载路径"
         }
     }
 }

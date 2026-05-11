@@ -15,7 +15,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "4.0"
+    plugin_version = "4.1"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -161,6 +161,27 @@ class Transfer115(_PluginBase):
         except Exception as e:
             logger.error(f"Transfer115: 添加离线任务失败: {e}")
 
+    def api_nav_dir(self, path: str = "/") -> dict:
+        """导航到目录"""
+        self.save_data("browse_path", path)
+        return {"code": 0}
+
+    def api_set_download_path(self, path: str = "/") -> dict:
+        """设置下载目录"""
+        clean_path = path.rstrip("/") if path != "/" else "/"
+        self._download_path = clean_path
+        self.update_config({
+            "enabled": self._enabled,
+            "notify_enabled": self._notify_enabled,
+            "auth_mode": self._auth_mode,
+            "cookie": self._cookie,
+            "download_path": clean_path,
+            "api_interval": self._api_interval,
+            "link_input": ""
+        })
+        logger.info(f"Transfer115: 下载目录已设置为: {clean_path}")
+        return {"code": 0, "msg": f"下载目录已设置为: {clean_path}"}
+
     def get_state(self) -> bool:
         return self._enabled
 
@@ -169,7 +190,22 @@ class Transfer115(_PluginBase):
         return []
 
     def get_api(self) -> List[Dict[str, Any]]:
-        return []
+        return [
+            {
+                "path": "/nav_dir",
+                "endpoint": self.api_nav_dir,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "导航到目录"
+            },
+            {
+                "path": "/set_download_path",
+                "endpoint": self.api_set_download_path,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "设置下载目录"
+            }
+        ]
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
@@ -337,7 +373,6 @@ class Transfer115(_PluginBase):
         }
 
     def get_page(self) -> List[dict]:
-        # 简单的状态显示
         if not self._enabled:
             return [{
                 "component": "div",
@@ -362,21 +397,182 @@ class Transfer115(_PluginBase):
                 auth_text = "❌ 115未授权，请前往 设置→存储→115网盘 登录"
                 auth_type = "error"
 
-        return [
-            {
+        status_section = {
+            "component": "VAlert",
+            "props": {"type": auth_type, "variant": "tonal", "text": auth_text}
+        }
+
+        # 当前下载目录
+        path_section = {
+            "component": "VAlert",
+            "props": {
+                "type": "info",
+                "variant": "tonal",
+                "density": "compact",
+                "text": f"当前下载目录: {self._download_path or '（未设置，将保存到根目录）'}"
+            }
+        }
+
+        # 目录浏览器（仅MP OAuth模式）
+        if self._auth_mode == "cookie":
+            browser_section = {
                 "component": "VAlert",
                 "props": {
-                    "type": auth_type,
+                    "type": "info",
                     "variant": "tonal",
-                    "text": auth_text
+                    "density": "compact",
+                    "text": "Cookie模式请在设置页手动填写下载目录路径"
                 }
-            },
-            {
-                "component": "div",
-                "props": {"class": "pa-2"},
-                "text": f"下载目录: {self._download_path or '（未设置，将保存到根目录）'}"
             }
-        ]
+        else:
+            browse_path = self.get_data("browse_path") or "/"
+
+            # 计算上级目录
+            if browse_path == "/":
+                parent_path = None
+            else:
+                parts = browse_path.rstrip("/").rsplit("/", 1)
+                parent_path = (parts[0] + "/") if parts[0] else "/"
+
+            # 获取目录列表
+            dir_items = []
+            dir_error = None
+            try:
+                from app.chain.storage import StorageChain
+                from app.schemas import FileItem
+                bp = browse_path if browse_path.endswith("/") else browse_path + "/"
+                fileitem = FileItem(storage="u115", path=bp, type="dir")
+                items = StorageChain().list_files(fileitem) or []
+                dir_items = [i for i in items if i.type == "dir"]
+            except Exception as e:
+                dir_error = str(e)
+
+            # 导航按钮行
+            nav_buttons = [
+                {
+                    "component": "span",
+                    "text": f"📂 {browse_path}",
+                    "props": {"class": "text-body-2 mr-2"}
+                }
+            ]
+            if parent_path is not None:
+                nav_buttons.append({
+                    "component": "VBtn",
+                    "props": {"size": "x-small", "variant": "tonal", "color": "secondary", "class": "mr-1"},
+                    "text": "返回上级",
+                    "events": {
+                        "click": {
+                            "api": "plugin/Transfer115/nav_dir",
+                            "method": "get",
+                            "params": {"path": parent_path}
+                        }
+                    }
+                })
+            nav_buttons.append({
+                "component": "VBtn",
+                "props": {"size": "x-small", "variant": "tonal", "color": "primary"},
+                "text": "设为下载目录",
+                "events": {
+                    "click": {
+                        "api": "plugin/Transfer115/set_download_path",
+                        "method": "get",
+                        "params": {"path": browse_path.rstrip("/")}
+                    }
+                }
+            })
+
+            # 目录内容
+            dir_content = []
+            if dir_error:
+                dir_content.append({
+                    "component": "VAlert",
+                    "props": {"type": "warning", "variant": "tonal", "density": "compact",
+                              "text": f"列出目录失败: {dir_error}"}
+                })
+            elif not dir_items:
+                dir_content.append({
+                    "component": "div",
+                    "text": "此目录下无子目录",
+                    "props": {"class": "text-caption text-center pa-2"}
+                })
+            else:
+                dir_rows = []
+                for d in dir_items:
+                    dir_rows.append({
+                        "component": "VListItem",
+                        "props": {"density": "compact"},
+                        "content": [
+                            {
+                                "component": "VListItemTitle",
+                                "props": {"class": "text-body-2"},
+                                "text": f"📁 {d.name}"
+                            },
+                            {
+                                "component": "VListItemSubtitle",
+                                "content": [
+                                    {
+                                        "component": "VBtn",
+                                        "props": {"size": "x-small", "variant": "tonal", "color": "secondary", "class": "mr-1"},
+                                        "text": "进入",
+                                        "events": {
+                                            "click": {
+                                                "api": "plugin/Transfer115/nav_dir",
+                                                "method": "get",
+                                                "params": {"path": d.path}
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "component": "VBtn",
+                                        "props": {"size": "x-small", "variant": "tonal", "color": "primary"},
+                                        "text": "设为下载目录",
+                                        "events": {
+                                            "click": {
+                                                "api": "plugin/Transfer115/set_download_path",
+                                                "method": "get",
+                                                "params": {"path": d.path.rstrip("/")}
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    })
+                dir_content.append({
+                    "component": "VList",
+                    "props": {"lines": "two", "density": "compact"},
+                    "content": dir_rows
+                })
+
+            browser_section = {
+                "component": "VCard",
+                "props": {"variant": "outlined", "class": "mt-2"},
+                "content": [
+                    {
+                        "component": "VCardTitle",
+                        "props": {"class": "text-body-1"},
+                        "text": "目录浏览器"
+                    },
+                    {
+                        "component": "VCardText",
+                        "content": [
+                            {
+                                "component": "VRow",
+                                "props": {"class": "align-center mb-1"},
+                                "content": [
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 12},
+                                        "content": nav_buttons
+                                    }
+                                ]
+                            }
+                        ] + dir_content
+                    }
+                ]
+            }
+
+        return [status_section, path_section, browser_section]
 
     def get_service(self) -> List[Dict[str, Any]]:
         return []
