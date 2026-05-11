@@ -644,75 +644,8 @@ class Transfer115(_PluginBase):
             parent_path = parts[0] + "/" if parts[0] else "/"
 
         if self._auth_mode == "cookie":
-            # In cookie mode the directory browser uses StorageChain (MP OAuth) which
-            # is a different credential. Disable the browser and show a clear message.
-            browser_nav_content = []
-            browser_nav_content.append({
-                "component": "span",
-                "text": f"当前路径: {browse_path}",
-                "props": {"class": "text-body-2 mr-2"}
-            })
-            if parent_path is not None:
-                browser_nav_content.append({
-                    "component": "VBtn",
-                    "props": {"size": "x-small", "variant": "tonal", "color": "secondary", "class": "mr-1"},
-                    "text": "返回上级",
-                    "events": {
-                        "click": {
-                            "api": "plugin/Transfer115/nav_dir",
-                            "method": "get",
-                            "params": {"path": parent_path}
-                        }
-                    }
-                })
-            browser_nav_content.append({
-                "component": "VBtn",
-                "props": {"size": "x-small", "variant": "tonal", "color": "secondary"},
-                "text": "刷新",
-                "events": {
-                    "click": {
-                        "api": "plugin/Transfer115/nav_dir",
-                        "method": "get",
-                        "params": {"path": browse_path}
-                    }
-                }
-            })
-            browser_section = {
-                "component": "VCard",
-                "props": {"variant": "outlined", "class": "mb-2"},
-                "content": [
-                    {
-                        "component": "VCardTitle",
-                        "props": {"class": "text-body-1"},
-                        "text": "目录浏览器"
-                    },
-                    {
-                        "component": "VCardText",
-                        "content": [
-                            {
-                                "component": "VRow",
-                                "props": {"class": "align-center mb-1"},
-                                "content": [
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12},
-                                        "content": browser_nav_content
-                                    }
-                                ]
-                            },
-                            {
-                                "component": "VAlert",
-                                "props": {
-                                    "type": "info",
-                                    "variant": "tonal",
-                                    "density": "compact",
-                                    "text": "Cookie模式下目录浏览器不可用，请手动在设置页填写目录路径"
-                                }
-                            }
-                        ]
-                    }
-                ]
-            }
+            # Cookie mode: hide the directory browser entirely.
+            browser_section = None
         else:
             # MP OAuth mode: try to list dirs via StorageChain
             # Try to list dirs
@@ -950,13 +883,13 @@ class Transfer115(_PluginBase):
             ]
         }
 
-        return [
+        return [c for c in [
             status_component,
             config_section,
             browser_section,
             task_section,
             refresh_section
-        ]
+        ] if c is not None]
 
     def get_service(self) -> List[Dict[str, Any]]:
         if self._enabled and self._download_path:
