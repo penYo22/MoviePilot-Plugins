@@ -14,5 +14,17 @@
             "v4.0": "精简为纯离线下载插件：配置下载目录，添加离线链接",
             "v4.1": "新增目录浏览器：数据页可视化浏览115目录并设置下载路径"
         }
+    },
+    "CustomPage": {
+        "name": "自定义美化页面",
+        "description": "通过侧栏全页入口展示美观的自定义仪表板页面，包含欢迎卡片、快捷导航、系统信息等美化元素",
+        "labels": "美化,仪表板,自定义页面,dashboard",
+        "version": "1.0",
+        "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/dashboard.png",
+        "author": "penYo22",
+        "level": 1,
+        "history": {
+            "v1.0": "初始版本：自定义美化仪表板页面，包含欢迎卡片、快捷导航、系统信息展示"
+        }
     }
 }

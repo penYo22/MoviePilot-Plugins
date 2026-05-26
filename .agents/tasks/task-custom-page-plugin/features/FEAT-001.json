@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create the CustomPage V2 plugin with Python backend, Vue 3 frontend source, and pre-built module federation artifacts. This plugin provides a beautiful custom dashboard page accessible via sidebar navigation.",
+  "status": "in_progress",
+  "steps": [
+    "Create directory plugins.v2/custompage/",
+    "Create plugins.v2/custompage/__init__.py with class CustomPage inheriting _PluginBase. Must include: plugin_name='自定义美化页面', plugin_desc describing it as a personalized dashboard, plugin_icon (use a dashboard/home icon URL from githubusercontent or a data URI), plugin_version='1.0', plugin_author='penYo22', author_url='https://github.com/penYo22', plugin_config_prefix='custompage_', plugin_order=1, auth_level=1. Implement get_render_mode() returning ('vue', 'dist/assets'). Implement get_sidebar_nav() returning a list with one dict: nav_key='CustomPageDashboard' (no slashes/spaces/special chars), section='start', title='美化首页', icon='mdi-view-dashboard', permission='admin'. Implement standard methods: init_plugin, get_state, get_command, get_api, get_form (minimal config with enable switch), get_page (fallback), get_service, stop_service.",
+    "Create plugins.v2/custompage/frontend/ directory with full Vue 3 + TypeScript + Vite project source: package.json (dependencies: vue, vuetify, @originjs/vite-plugin-federation, vite, @vitejs/plugin-vue, typescript, vue-tsc), vite.config.ts (with federation plugin exposing ./Page, ./Config, ./AppPage; shared vue/vuetify with requiredVersion:false, generate:false; build target esnext, format esm), tsconfig.json, src/App.vue, src/main.ts, src/components/AppPage.vue (the main sidebar page component receiving props: api, navKey, pluginId), src/components/Page.vue (plugin detail page), src/components/Config.vue (config component).",
+    "The AppPage.vue component should be a beautiful dashboard using Vuetify components: a welcome banner card with gradient background, quick navigation cards (grid of 4-6 cards with icons linking to common MoviePilot sections like discovery/subscribe/history/settings), a system info section showing current time and greeting based on time of day, and a decorative footer. Use Vuetify's v-card, v-row, v-col, v-icon, v-chip, v-btn, etc. Make it visually appealing with colors, shadows, and spacing.",
+    "Create plugins.v2/custompage/dist/assets/ directory with pre-built module federation files: remoteEntry.js (the federation entry point that registers the remote modules ./Page, ./Config, ./AppPage and resolves shared dependencies vue and vuetify from the host), plus any necessary __federation_shared and __federation_expose helper files. The remoteEntry.js must use __vite__mapDeps pattern and properly expose the three components. Since we cannot run npm build, hand-craft these files to be functional federation bundles that render the Vuetify-based dashboard UI.",
+    "Update package.v2.json at repo root to add a 'CustomPage' entry with: name='自定义美化页面', description='通过侧栏全页入口展示美观的自定义仪表板页面，包含欢迎卡片、快捷导航、系统信息等美化元素', labels='美化,仪表板,自定义页面,dashboard', version='1.0', icon (same as plugin_icon), author='penYo22', level=1, history with v1.0 entry.",
+    "Create plugins.v2/custompage/README.md with usage instructions explaining how to install the plugin, what it does, and how to rebuild the frontend (cd frontend && npm install && npm run build, then copy dist/assets/*.js to ../dist/assets/)."
+  ],
+  "acceptance_criteria": [
+    "plugins.v2/custompage/__init__.py exists and is valid Python syntax",
+    "CustomPage class properly inherits _PluginBase and implements get_render_mode() returning ('vue', 'dist/assets')",
+    "get_sidebar_nav() returns valid nav entry with section='start' and nav_key without special characters",
+    "plugins.v2/custompage/frontend/ contains a complete buildable Vue 3 project with vite.config.ts using federation plugin",
+    "plugins.v2/custompage/dist/assets/remoteEntry.js exists and is a valid JavaScript module federation entry",
+    "package.v2.json contains CustomPage entry with version '1.0' matching plugin_version",
+    "The AppPage component renders a visually appealing dashboard with welcome card, quick nav cards, and system info"
+  ],
+  "verification": [
+    "Run python3 -c \"import ast; ast.parse(open('plugins.v2/custompage/__init__.py').read())\" to verify Python syntax",
+    "Run python3 -c \"import json; d=json.load(open('package.v2.json')); assert 'CustomPage' in d; assert d['CustomPage']['version']=='1.0'\" to verify package index",
+    "Run node -e \"import('./plugins.v2/custompage/dist/assets/remoteEntry.js')\" or verify the JS file is syntactically valid",
+    "Verify frontend vite.config.ts contains federation plugin configuration with correct exposes and shared settings"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
