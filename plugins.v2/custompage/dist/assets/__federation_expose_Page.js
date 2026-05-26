@@ -1,5 +1,8 @@
 /**
  * Federation Exposed Module: ./Page
+ *
+ * NOTE: This file is hand-crafted. Regenerate via `npm run build` in the
+ * frontend/ directory when source changes, then copy dist/assets/ output here.
  */
 import { h, resolveComponent } from 'vue';
 

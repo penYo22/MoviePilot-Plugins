@@ -28,6 +28,7 @@
     <h2 class="text-h6 font-weight-bold mb-4">
       <v-icon class="mr-2">mdi-compass</v-icon>
       快捷导航
+      <span class="text-caption text-medium-emphasis ml-2">功能入口</span>
     </h2>
     <v-row class="mb-6">
       <v-col
@@ -38,9 +39,8 @@
         md="2"
       >
         <v-card
-          class="text-center pa-4 rounded-lg nav-card"
+          class="text-center pa-4 rounded-lg"
           variant="outlined"
-          hover
         >
           <v-icon
             :color="nav.color"
@@ -189,11 +189,4 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.nav-card {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-.nav-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15) !important;
-}
 </style>

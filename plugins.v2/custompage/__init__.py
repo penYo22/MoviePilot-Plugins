@@ -9,7 +9,7 @@ class CustomPage(_PluginBase):
     # 插件描述
     plugin_desc = "通过侧栏全页入口展示美观的自定义仪表板页面，包含欢迎卡片、快捷导航、系统信息等美化元素"
     # 插件图标
-    plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/dashboard.png"
+    plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/public/logo.png"
     # 插件版本
     plugin_version = "1.0"
     # 插件作者

@@ -1,6 +1,7 @@
 /**
  * CustomPage Module Federation Remote Entry
- * Generated for MoviePilot V2 Plugin system
+ * NOTE: This file is hand-crafted. Regenerate via `npm run build` in the
+ * frontend/ directory when source changes, then copy dist/assets/ output here.
  */
 
 const moduleMap = {
@@ -29,16 +30,24 @@ const init = (shareScope) => {
   if (shareScope.vue) {
     const vueEntry = shareScope.vue;
     const vueVersions = Object.values(vueEntry);
-    if (vueVersions.length > 0) {
+    if (vueVersions.length > 0 && vueVersions[0].get) {
       __federation_shared_vue = vueVersions[0].get;
+    } else {
+      console.error('[CustomPage] shareScope.vue has no valid entries or missing get()');
     }
+  } else {
+    console.error('[CustomPage] shareScope.vue is missing from shared scope');
   }
   if (shareScope.vuetify) {
     const vuetifyEntry = shareScope.vuetify;
     const vuetifyVersions = Object.values(vuetifyEntry);
-    if (vuetifyVersions.length > 0) {
+    if (vuetifyVersions.length > 0 && vuetifyVersions[0].get) {
       __federation_shared_vuetify = vuetifyVersions[0].get;
+    } else {
+      console.error('[CustomPage] shareScope.vuetify has no valid entries or missing get()');
     }
+  } else {
+    console.error('[CustomPage] shareScope.vuetify is missing from shared scope');
   }
 };
 

@@ -1,6 +1,9 @@
 /**
  * Federation Exposed Module: ./AppPage
  * Beautiful dashboard page with Vuetify components
+ *
+ * NOTE: This file is hand-crafted. Regenerate via `npm run build` in the
+ * frontend/ directory when source changes, then copy dist/assets/ output here.
  */
 import { ref, computed, onMounted, onUnmounted, h, resolveComponent } from 'vue';
 
@@ -102,7 +105,8 @@ const AppPage = {
       // Quick Navigation
       const navHeader = h('h2', { class: 'text-h6 font-weight-bold mb-4' }, [
         h(VIcon, { class: 'mr-2' }, () => 'mdi-compass'),
-        '\u5FEB\u6377\u5BFC\u822A'
+        '\u5FEB\u6377\u5BFC\u822A',
+        h('span', { class: 'text-caption text-medium-emphasis ml-2' }, '\u529F\u80FD\u5165\u53E3')
       ]);
 
       const navCards = h(VRow, { class: 'mb-6' }, () =>
@@ -110,9 +114,7 @@ const AppPage = {
           h(VCol, { cols: 6, sm: 4, md: 2, key: nav.title }, () => [
             h(VCard, {
               class: 'text-center pa-4 rounded-lg',
-              variant: 'outlined',
-              hover: true,
-              style: { transition: 'transform 0.2s ease, box-shadow 0.2s ease' }
+              variant: 'outlined'
             }, () => [
               h(VIcon, { color: nav.color, size: 40, class: 'mb-2' }, () => nav.icon),
               h('div', { class: 'text-body-2 font-weight-medium' }, nav.title),
