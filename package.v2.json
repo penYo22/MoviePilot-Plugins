@@ -15,5 +15,17 @@
             "v4.1": "新增目录浏览器：数据页可视化浏览115目录并设置下载路径",
             "v4.2": "恢复自动轮询整理：支持下载完成稳定等待、失败重试、失败归档、任务限流和记录自动清理"
         }
+    },
+    "MediaCodecScanner": {
+        "name": "媒体编码扫描",
+        "description": "扫描媒体库视频编码，收集 Chrome 可能无法直接播放的文件并通知管理员",
+        "labels": "媒体库,编码,Chrome,ffprobe,通知",
+        "version": "1.0",
+        "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/logo.png",
+        "author": "penYo22",
+        "level": 1,
+        "history": {
+            "v1.0": "初始版本：定时扫描媒体库，识别封装/视频/音频编码，通知Chrome兼容性风险文件"
+        }
     }
 }
