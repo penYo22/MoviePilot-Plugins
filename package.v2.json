@@ -20,11 +20,12 @@
         "name": "媒体编码扫描",
         "description": "扫描媒体库视频编码，收集 Chrome 可能无法直接播放的文件并通知管理员",
         "labels": "媒体库,编码,Chrome,ffprobe,通知",
-        "version": "1.0",
+        "version": "1.1",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/logo.png",
         "author": "penYo22",
         "level": 1,
         "history": {
+            "v1.1": "简化配置：新增兼容策略预设，常用参数集中展示，高级规则折叠保留",
             "v1.0": "初始版本：定时扫描媒体库，识别封装/视频/音频编码，通知Chrome兼容性风险文件"
         }
     }

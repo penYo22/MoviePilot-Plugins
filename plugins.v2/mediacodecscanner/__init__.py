@@ -18,7 +18,7 @@ class MediaCodecScanner(_PluginBase):
     plugin_name = "媒体编码扫描"
     plugin_desc = "扫描媒体库视频编码，收集 Chrome 可能无法直接播放的文件并通知管理员。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/logo.png"
-    plugin_version = "1.0"
+    plugin_version = "1.1"
     plugin_author = "penYo22"
     author_url = "https://github.com/penYo22"
     plugin_config_prefix = "mediacodecscanner_"
@@ -62,10 +62,42 @@ class MediaCodecScanner(_PluginBase):
         "rv40",
     ]
     _audio_codec_options = ["aac", "mp3", "opus", "vorbis", "flac", "ac3", "eac3", "dts", "truehd", "wmapro", "wmav2"]
+    _profile_options = [
+        {"title": "Chrome 默认（推荐）", "value": "chrome"},
+        {"title": "严格网页播放", "value": "strict"},
+        {"title": "宽松模式", "value": "relaxed"},
+        {"title": "自定义规则", "value": "custom"},
+    ]
+    _profile_rules = {
+        "chrome": {
+            "containers": _chrome_containers,
+            "video": _chrome_video_codecs,
+            "audio": _chrome_audio_codecs,
+            "blocked_video": _problem_video_codecs,
+            "blocked_audio": _problem_audio_codecs,
+        },
+        "strict": {
+            "containers": {"mp4", "webm"},
+            "video": {"h264", "avc1", "vp8", "vp9", "av1"},
+            "audio": {"aac", "mp3", "opus"},
+            "blocked_video": _problem_video_codecs,
+            "blocked_audio": _problem_audio_codecs | {"flac", "vorbis"},
+        },
+        "relaxed": {
+            "containers": _chrome_containers | {"matroska", "mpegts"},
+            "video": _chrome_video_codecs | {"hevc", "h265"},
+            "audio": _chrome_audio_codecs | {"ac3", "eac3"},
+            "blocked_video": _problem_video_codecs - {"hevc", "h265"},
+            "blocked_audio": _problem_audio_codecs - {"ac3", "eac3"},
+        },
+    }
 
     _enabled: bool = False
     _notify_enabled: bool = True
     _only_new: bool = True
+    _profile: str = "chrome"
+    _extra_allowed_video_codecs: List[str] = []
+    _extra_blocked_video_codecs: List[str] = []
     _scan_paths: str = ""
     _exclude_paths: str = ""
     _ffprobe_path: str = "ffprobe"
@@ -89,6 +121,19 @@ class MediaCodecScanner(_PluginBase):
         self._enabled = bool(config.get("enabled", False))
         self._notify_enabled = bool(config.get("notify_enabled", True))
         self._only_new = bool(config.get("only_new", True))
+        legacy_rule_keys = {
+            "allowed_containers",
+            "allowed_video_codecs",
+            "allowed_audio_codecs",
+            "blocked_video_codecs",
+            "blocked_audio_codecs",
+        }
+        default_profile = "custom" if "profile" not in config and legacy_rule_keys & config.keys() else "chrome"
+        self._profile = str(config.get("profile") or default_profile).strip().lower()
+        if self._profile not in {*self._profile_rules, "custom"}:
+            self._profile = "chrome"
+        self._extra_allowed_video_codecs = self.__codec_list(config.get("extra_allowed_video_codecs"), set())
+        self._extra_blocked_video_codecs = self.__codec_list(config.get("extra_blocked_video_codecs"), set())
         self._scan_paths = str(config.get("scan_paths") or "").strip()
         self._exclude_paths = str(config.get("exclude_paths") or "").strip()
         self._ffprobe_path = str(config.get("ffprobe_path") or "ffprobe").strip() or "ffprobe"
@@ -180,6 +225,136 @@ class MediaCodecScanner(_PluginBase):
         ]
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
+        full_form, defaults = self.__full_form_schema()
+        fields = full_form[0]["content"]
+        simple_fields = [
+            {
+                "component": "VAlert",
+                "props": {"type": "info", "variant": "tonal", "class": "mb-3"},
+                "text": "首次使用只需选择扫描目录和兼容策略；其他参数保持默认即可。",
+            },
+            fields[0],
+            {"component": "VRow", "content": [fields[3]["content"][0]]},
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 6},
+                        "content": [
+                            {
+                                "component": "VSelect",
+                                "props": {
+                                    "model": "profile",
+                                    "label": "兼容策略",
+                                    "items": self._profile_options,
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 6, "md": 3},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {"model": "interval_hours", "label": "扫描间隔(小时)", "type": "number"},
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 6, "md": 3},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {"model": "min_file_mb", "label": "最小文件(MB)", "type": "number"},
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 6},
+                        "content": [
+                            {
+                                "component": "VCombobox",
+                                "props": {
+                                    "model": "extra_allowed_video_codecs",
+                                    "label": "额外允许的视频编码（可选）",
+                                    "items": self._video_codec_options,
+                                    "multiple": True,
+                                    "chips": True,
+                                    "closable-chips": True,
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 6},
+                        "content": [
+                            {
+                                "component": "VCombobox",
+                                "props": {
+                                    "model": "extra_blocked_video_codecs",
+                                    "label": "额外标记的视频编码（可选）",
+                                    "items": self._video_codec_options,
+                                    "multiple": True,
+                                    "chips": True,
+                                    "closable-chips": True,
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "component": "VExpansionPanels",
+                "props": {"variant": "accordion", "class": "mt-2"},
+                "content": [
+                    {
+                        "component": "VExpansionPanel",
+                        "content": [
+                            {"component": "VExpansionPanelTitle", "text": "高级设置与自定义规则"},
+                            {
+                                "component": "VExpansionPanelText",
+                                "content": [
+                                    {
+                                        "component": "VAlert",
+                                        "props": {"type": "warning", "variant": "tonal", "class": "mb-3"},
+                                        "text": "仅选择“自定义规则”时，下方完整编码规则才会生效。",
+                                    },
+                                    fields[1],
+                                    fields[2],
+                                    {"component": "VRow", "content": [fields[3]["content"][1]]},
+                                    {
+                                        "component": "VRow",
+                                        "content": [fields[4]["content"][0], fields[4]["content"][2]],
+                                    },
+                                    {
+                                        "component": "VRow",
+                                        "content": [
+                                            fields[5]["content"][0],
+                                            fields[5]["content"][2],
+                                            fields[5]["content"][3],
+                                            fields[6]["content"][0],
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            },
+        ]
+        return [{"component": "VForm", "content": simple_fields}], defaults
+
+    def __full_form_schema(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
             {
                 "component": "VForm",
@@ -599,11 +774,13 @@ class MediaCodecScanner(_PluginBase):
         audio_codecs = [str(item.get("codec_name") or "").lower() for item in audio_streams]
         reasons = []
 
-        allowed_containers = set(self._allowed_containers or self._chrome_containers)
-        allowed_video_codecs = set(self._allowed_video_codecs or self._chrome_video_codecs)
-        allowed_audio_codecs = set(self._allowed_audio_codecs or self._chrome_audio_codecs)
-        blocked_video_codecs = set(self._blocked_video_codecs or self._problem_video_codecs)
-        blocked_audio_codecs = set(self._blocked_audio_codecs or self._problem_audio_codecs)
+        (
+            allowed_containers,
+            allowed_video_codecs,
+            allowed_audio_codecs,
+            blocked_video_codecs,
+            blocked_audio_codecs,
+        ) = self.__active_rules()
 
         if containers and not (containers & allowed_containers):
             reasons.append(f"封装 {format_name} 非Chrome原生友好")
@@ -626,6 +803,29 @@ class MediaCodecScanner(_PluginBase):
             resolution=f"{width}x{height}" if width and height else "",
             reasons=reasons,
         )
+
+    def __active_rules(self) -> Tuple[set, set, set, set, set]:
+        if self._profile == "custom":
+            allowed_containers = set(self._allowed_containers or self._chrome_containers)
+            allowed_video = set(self._allowed_video_codecs or self._chrome_video_codecs)
+            allowed_audio = set(self._allowed_audio_codecs or self._chrome_audio_codecs)
+            blocked_video = set(self._blocked_video_codecs or self._problem_video_codecs)
+            blocked_audio = set(self._blocked_audio_codecs or self._problem_audio_codecs)
+        else:
+            rules = self._profile_rules.get(self._profile, self._profile_rules["chrome"])
+            allowed_containers = set(rules["containers"])
+            allowed_video = set(rules["video"])
+            allowed_audio = set(rules["audio"])
+            blocked_video = set(rules["blocked_video"])
+            blocked_audio = set(rules["blocked_audio"])
+
+        for codec in self._extra_allowed_video_codecs:
+            allowed_video.add(codec)
+            blocked_video.discard(codec)
+        for codec in self._extra_blocked_video_codecs:
+            blocked_video.add(codec)
+            allowed_video.discard(codec)
+        return allowed_containers, allowed_video, allowed_audio, blocked_video, blocked_audio
 
     def __build_error_record(self, file_path: Path, error: str) -> Dict[str, Any]:
         return self.__build_record(
@@ -769,6 +969,9 @@ class MediaCodecScanner(_PluginBase):
                 "enabled": self._enabled,
                 "notify_enabled": self._notify_enabled,
                 "only_new": self._only_new,
+                "profile": self._profile,
+                "extra_allowed_video_codecs": self._extra_allowed_video_codecs,
+                "extra_blocked_video_codecs": self._extra_blocked_video_codecs,
                 "scan_paths": self._scan_paths,
                 "exclude_paths": self._exclude_paths,
                 "ffprobe_path": self._ffprobe_path,
@@ -794,6 +997,9 @@ class MediaCodecScanner(_PluginBase):
             "enabled": False,
             "notify_enabled": True,
             "only_new": True,
+            "profile": "chrome",
+            "extra_allowed_video_codecs": [],
+            "extra_blocked_video_codecs": [],
             "scan_paths": "",
             "exclude_paths": "",
             "ffprobe_path": "ffprobe",
