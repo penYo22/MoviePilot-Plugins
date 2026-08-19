@@ -4,6 +4,7 @@
         "description": "⚠️ 未经测试，封号自理。添加115离线任务，轮询完成状态并自动整理入库",
         "labels": "115,离线下载,云盘",
         "version": "4.2",
+        "v3": false,
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "penYo22",
         "level": 1,
