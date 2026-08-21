@@ -1,4 +1,5 @@
 import datetime
+import json
 import re
 import time
 import uuid
@@ -19,11 +20,11 @@ class Transfer115(_PluginBase):
     # 插件名称
     plugin_name = "115离线下载"
     # 插件描述
-    plugin_desc = "提交115离线下载任务，支持MoviePilot识别链预览和批量修改115文件名称。"
+    plugin_desc = "提交115离线下载任务，支持文件勾选、自定义拆分测试和批量修改115文件名称。"
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "5.0.0"
+    plugin_version = "5.1.0"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -55,6 +56,9 @@ class Transfer115(_PluginBase):
     _rename_enabled: bool = True
     _rename_directories: bool = True
     _rename_max_files: int = 200
+    _split_delimiters: str = ""
+    _split_template: str = "{1} - {2}"
+    _split_keep_extension: bool = True
     _checking: bool = False
 
     _max_records = 200
@@ -81,6 +85,9 @@ class Transfer115(_PluginBase):
         self._rename_enabled = bool(config.get("rename_enabled", True))
         self._rename_directories = bool(config.get("rename_directories", True))
         self._rename_max_files = self.__safe_int(config.get("rename_max_files"), 200, 1, 1000)
+        self._split_delimiters = str(config.get("split_delimiters") or "")[:1000]
+        self._split_template = str(config.get("split_template") or "{1} - {2}")[:255]
+        self._split_keep_extension = bool(config.get("split_keep_extension", True))
 
         self.__cleanup_history()
 
@@ -103,6 +110,24 @@ class Transfer115(_PluginBase):
     @staticmethod
     def get_command() -> List[Dict[str, Any]]:
         return []
+
+    @staticmethod
+    def get_render_mode() -> Tuple[str, str]:
+        return "vue", "dist/assets"
+
+    def get_sidebar_nav(self) -> List[Dict[str, Any]]:
+        if not self.get_state():
+            return []
+        return [
+            {
+                "nav_key": "main",
+                "title": "115文件管理器",
+                "icon": "mdi-folder-edit-outline",
+                "section": "organize",
+                "permission": "manage",
+                "order": 48,
+            }
+        ]
 
     def get_api(self) -> List[Dict[str, Any]]:
         return [
@@ -176,6 +201,41 @@ class Transfer115(_PluginBase):
                 "auth": "bear",
                 "summary": "确认执行115批量改名",
             },
+            {
+                "path": "/file_manager",
+                "endpoint": self.api_file_manager,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "浏览115文件管理器",
+            },
+            {
+                "path": "/plugin_state",
+                "endpoint": self.api_plugin_state,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "读取115插件状态与配置",
+            },
+            {
+                "path": "/settings",
+                "endpoint": self.api_update_settings,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "更新115插件配置",
+            },
+            {
+                "path": "/preview_custom_rename",
+                "endpoint": self.api_preview_custom_rename,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "校验并预览勾选文件改名",
+            },
+            {
+                "path": "/apply_custom_rename",
+                "endpoint": self.api_apply_custom_rename,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "执行勾选文件改名",
+            },
         ]
 
     def api_refresh_tasks(self) -> dict:
@@ -187,6 +247,250 @@ class Transfer115(_PluginBase):
     def api_nav_dir(self, path: str = "/") -> dict:
         self.save_data("browse_path", self.__clean_path(path, default="/"))
         return {"code": 0}
+
+    def api_plugin_state(self) -> dict:
+        """提供 Vue 文件管理器使用的轻量状态。"""
+        return {
+            "code": 0,
+            "enabled": self._enabled,
+            "rename_enabled": self._rename_enabled,
+            "download_path": self._download_path,
+            "split_tokens": self.__split_tokens(self._split_delimiters),
+            "split_template": self._split_template,
+            "split_keep_extension": self._split_keep_extension,
+            "config": {
+                "enabled": self._enabled,
+                "notify_enabled": self._notify_enabled,
+                "auto_organize": self._auto_organize,
+                "auth_mode": self._auth_mode,
+                "has_cookie": bool(self._cookie),
+                "download_path": self._download_path,
+                "library_path": self._library_path,
+                "fail_path": self._fail_path,
+                "transfer_type": self._transfer_type,
+                "poll_interval": self._poll_interval,
+                "api_interval": self._api_interval,
+                "max_retries": self._max_retries,
+                "stabilize_cycles": self._stabilize_cycles,
+                "max_tasks_per_poll": self._max_tasks_per_poll,
+                "cleanup_empty_folder": self._cleanup_empty_folder,
+                "history_retention_days": self._history_retention_days,
+                "rename_enabled": self._rename_enabled,
+                "rename_directories": self._rename_directories,
+                "rename_max_files": self._rename_max_files,
+                "split_delimiters": self._split_delimiters,
+                "split_template": self._split_template,
+                "split_keep_extension": self._split_keep_extension,
+            },
+        }
+
+    def api_update_settings(self, payload: Optional[dict] = Body(default=None)) -> dict:
+        """更新插件设置，不触碰115文件。"""
+        payload = payload or {}
+        self._enabled = bool(payload.get("enabled", self._enabled))
+        self._notify_enabled = bool(payload.get("notify_enabled", self._notify_enabled))
+        self._auto_organize = bool(payload.get("auto_organize", self._auto_organize))
+        auth_mode = str(payload.get("auth_mode") or self._auth_mode)
+        self._auth_mode = auth_mode if auth_mode in {"mp_oauth", "cookie"} else "mp_oauth"
+        if str(payload.get("cookie") or "").strip():
+            self._cookie = str(payload.get("cookie") or "").strip()
+        self._download_path = self.__clean_path(payload.get("download_path", self._download_path))
+        self._library_path = self.__clean_path(payload.get("library_path", self._library_path))
+        self._fail_path = self.__clean_path(payload.get("fail_path", self._fail_path))
+        transfer_type = str(payload.get("transfer_type") or self._transfer_type)
+        self._transfer_type = transfer_type if transfer_type in {"move", "copy"} else "move"
+        self._poll_interval = self.__safe_int(payload.get("poll_interval"), self._poll_interval, 1, 1440)
+        self._api_interval = self.__safe_int(payload.get("api_interval"), self._api_interval, 0, 3600)
+        self._max_retries = self.__safe_int(payload.get("max_retries"), self._max_retries, 1, 20)
+        self._stabilize_cycles = self.__safe_int(payload.get("stabilize_cycles"), self._stabilize_cycles, 0, 10)
+        self._max_tasks_per_poll = self.__safe_int(payload.get("max_tasks_per_poll"), self._max_tasks_per_poll, 1, 200)
+        self._cleanup_empty_folder = bool(payload.get("cleanup_empty_folder", self._cleanup_empty_folder))
+        self._history_retention_days = self.__safe_int(payload.get("history_retention_days"), self._history_retention_days, 0, 3650)
+        self._rename_enabled = bool(payload.get("rename_enabled", self._rename_enabled))
+        self._rename_directories = bool(payload.get("rename_directories", self._rename_directories))
+        self._rename_max_files = self.__safe_int(payload.get("rename_max_files"), self._rename_max_files, 1, 1000)
+        split_tokens = payload.get("split_tokens")
+        if isinstance(split_tokens, list):
+            self._split_delimiters = json.dumps(
+                [str(token)[:50] for token in split_tokens if str(token)],
+                ensure_ascii=False,
+            )[:1000]
+        elif "split_delimiters" in payload:
+            self._split_delimiters = str(payload.get("split_delimiters") or "")[:1000]
+        self._split_template = str(payload.get("split_template") or self._split_template)[:255]
+        self._split_keep_extension = bool(payload.get("split_keep_extension", self._split_keep_extension))
+        self.__save_config()
+        state = self.api_plugin_state()
+        state["msg"] = "设置已保存；定时服务相关变更将在插件重新加载后生效"
+        return state
+
+    def api_file_manager(self, path: str = "") -> dict:
+        """列出当前115目录的文件和子目录，供 Vue 文件管理器浏览。"""
+        if not self._enabled:
+            return {"code": 1, "msg": "插件未启用", "items": []}
+        if self._auth_mode == "cookie":
+            return {"code": 1, "msg": "文件管理器需要使用MoviePilot内置115授权", "items": []}
+
+        browse_path = self.__clean_path(path or self._download_path, default="/")
+        try:
+            from app.chain.storage import StorageChain
+            from app.schemas import FileItem
+
+            root = FileItem(storage="u115", path=self.__dir_path(browse_path), type="dir")
+            self._sleep_if_needed()
+            items = StorageChain().list_files(root) or []
+            result = []
+            for item in items:
+                item_path = self.__clean_path(str(item.path or ""))
+                if not item_path:
+                    continue
+                item_type = self.__display_value(getattr(item, "type", "file"))
+                result.append(
+                    {
+                        "name": str(item.name or PurePosixPath(item_path).name),
+                        "path": item_path,
+                        "type": "dir" if item_type == "dir" else "file",
+                        "fileid": str(item.fileid or ""),
+                        "size": int(getattr(item, "size", 0) or 0),
+                    }
+                )
+            result.sort(key=lambda item: (item["type"] != "dir", item["name"].casefold()))
+            parent = None
+            if browse_path != "/":
+                parent = PurePosixPath(browse_path).parent.as_posix()
+                if parent == ".":
+                    parent = "/"
+            return {
+                "code": 0,
+                "path": browse_path,
+                "parent": parent,
+                "items": result,
+                "selected_count": 0,
+            }
+        except Exception as e:
+            logger.warning(f"Transfer115: 文件管理器读取目录失败: {e}")
+            return {"code": 1, "msg": str(e), "path": browse_path, "items": []}
+
+    def api_preview_custom_rename(self, payload: Optional[dict] = Body(default=None)) -> dict:
+        """根据鼠标选取的拆分字符串，预览勾选文件的新名称。"""
+        if not self._enabled or not self._rename_enabled:
+            return {"code": 1, "msg": "改名功能未启用"}
+        payload = payload or {}
+        paths = [self.__clean_path(str(path)) for path in (payload.get("selected_paths") or [])]
+        paths = list(dict.fromkeys(path for path in paths if path))[: self._rename_max_files]
+        tokens = [str(token)[:50] for token in (payload.get("split_tokens") or []) if str(token)]
+        template = str(payload.get("template") or self._split_template)[:255]
+        keep_extension = bool(payload.get("keep_extension", self._split_keep_extension))
+        if not paths:
+            return {"code": 1, "msg": "请先勾选要改名的文件", "items": []}
+        if not tokens:
+            return {"code": 1, "msg": "请先在样例文件名中拖选要拆分的文字", "items": []}
+        if not re.search(r"\{\d+\}", template):
+            return {"code": 1, "msg": "命名模板至少需要一个片段占位符，例如 {1} {2}", "items": []}
+
+        try:
+            from app.chain.storage import StorageChain
+            from app.schemas import FileItem
+
+            storage_chain = StorageChain()
+            preview_items = []
+            errors = []
+            target_keys = set()
+            for path in paths:
+                old_name = PurePosixPath(path).name
+                current = storage_chain.get_item(
+                    FileItem(storage="u115", type="file", path=path, name=old_name)
+                )
+                if not current:
+                    errors.append({"path": path, "msg": "远端文件不存在或路径已变化"})
+                    continue
+                parts, new_name = self.__split_filename(old_name, tokens, template, keep_extension)
+                if not new_name:
+                    errors.append({"path": path, "msg": "模板生成了空文件名"})
+                    continue
+                target_key = (PurePosixPath(path).parent.as_posix(), new_name.casefold())
+                if target_key in target_keys:
+                    errors.append({"path": path, "msg": f"生成了重复名称: {new_name}"})
+                    continue
+                target_keys.add(target_key)
+                preview_items.append(
+                    {
+                        "type": "file",
+                        "path": path,
+                        "fileid": str(current.fileid or ""),
+                        "name": old_name,
+                        "parts": parts,
+                        "new_name": new_name,
+                        "unchanged": old_name == new_name,
+                    }
+                )
+            plan = {
+                "code": 0 if preview_items else 1,
+                "msg": f"已测试 {len(preview_items)} 个文件，可改名 {sum(not item['unchanged'] for item in preview_items)} 个",
+                "plan_id": uuid.uuid4().hex,
+                "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                "tokens": tokens,
+                "template": template,
+                "keep_extension": keep_extension,
+                "items": preview_items,
+                "errors": errors,
+            }
+            self.save_data("split_rename_plan", plan)
+            return plan
+        except Exception as e:
+            logger.error(f"Transfer115: 自定义拆分预览失败: {e}")
+            return {"code": 1, "msg": str(e), "items": []}
+
+    def api_apply_custom_rename(self, payload: Optional[dict] = Body(default=None)) -> dict:
+        """执行最近一次自定义拆分测试计划中的文件。"""
+        if not self._enabled or not self._rename_enabled:
+            return {"code": 1, "msg": "改名功能未启用"}
+        payload = payload or {}
+        plan = self.get_data("split_rename_plan") or {}
+        if not plan.get("plan_id") or str(payload.get("plan_id") or "") != str(plan.get("plan_id")):
+            return {"code": 1, "msg": "测试计划已变化，请重新测试"}
+        if self.__rename_plan_expired(plan):
+            self.del_data("split_rename_plan")
+            return {"code": 1, "msg": "测试计划已过期，请重新测试"}
+
+        try:
+            from app.chain.storage import StorageChain
+            from app.schemas import FileItem
+
+            storage_chain = StorageChain()
+            success, failed = [], []
+            for item in plan.get("items") or []:
+                old_name = str(item.get("name") or "")
+                new_name = self.__safe_name(item.get("new_name"))
+                path = self.__clean_path(item.get("path"))
+                if not old_name or not new_name or not path:
+                    failed.append({"name": old_name, "msg": "改名计划条目不完整"})
+                    continue
+                if old_name == new_name:
+                    success.append({"old_name": old_name, "new_name": new_name, "skipped": True})
+                    continue
+                current = storage_chain.get_item(
+                    FileItem(storage="u115", type="file", path=path, name=old_name, fileid=str(item.get("fileid") or "") or None)
+                )
+                if not current:
+                    failed.append({"name": old_name, "msg": "远端文件已不存在或路径已变化"})
+                    continue
+                sibling = FileItem(storage="u115", type="dir", path=self.__dir_path(PurePosixPath(path).parent.as_posix()))
+                siblings = storage_chain.list_files(sibling) or []
+                if any(str(s.name or "").casefold() == new_name.casefold() and s.path != current.path for s in siblings):
+                    failed.append({"name": old_name, "msg": f"目标名称已存在: {new_name}"})
+                    continue
+                self._sleep_if_needed()
+                if storage_chain.rename_file(current, new_name):
+                    success.append({"old_name": old_name, "new_name": new_name})
+                else:
+                    failed.append({"name": old_name, "msg": "115重命名接口返回失败"})
+            self.del_data("split_rename_plan")
+            self.__upsert_task_record("自定义拆分改名", f"完成 {len(success)} 个，失败 {len(failed)} 个")
+            return {"code": 0 if success or not failed else 1, "msg": f"改名完成：成功 {len(success)} 个，失败 {len(failed)} 个", "success": success, "failed": failed}
+        except Exception as e:
+            logger.error(f"Transfer115: 执行自定义改名失败: {e}")
+            return {"code": 1, "msg": str(e)}
 
     def api_set_download_path(self, path: str = "/") -> dict:
         return self.api_set_path(field="download_path", path=path)
@@ -218,6 +522,7 @@ class Transfer115(_PluginBase):
             "download_done_tasks",
             "last_poll_summary",
             "rename_plan",
+            "split_rename_plan",
         ):
             self.del_data(key)
         logger.info("Transfer115: 插件任务记录已清空")
@@ -576,6 +881,45 @@ class Transfer115(_PluginBase):
         clean = re.sub(r'[\\/:*?"<>|\x00-\x1f]', " ", str(name or ""))
         clean = re.sub(r"\s+", " ", clean).strip(" .")
         return "" if clean in {"", ".", ".."} else clean[:255]
+
+    @staticmethod
+    def __split_tokens(value: Any) -> List[str]:
+        """把保存的拆分字符转换为按长度优先的字面量列表。"""
+        text = str(value or "")
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            parsed = None
+        if isinstance(parsed, list):
+            tokens = [str(part) for part in parsed if str(part)]
+        elif "|" in text:
+            tokens = [part for part in text.split("|") if part]
+        else:
+            tokens = list(text)
+        return list(dict.fromkeys(sorted(tokens, key=len, reverse=True)))
+
+    @classmethod
+    def __split_filename(cls, name: str, tokens: List[str], template: str,
+                         keep_extension: bool) -> Tuple[List[str], str]:
+        """按鼠标选中的字面量拆分文件名，并以数字占位符重新组合。"""
+        suffix = PurePosixPath(name).suffix
+        stem = name[:-len(suffix)] if suffix else name
+        clean_tokens = list(dict.fromkeys(token for token in tokens if token))
+        pattern = "|".join(re.escape(token) for token in sorted(clean_tokens, key=len, reverse=True))
+        parts = [part.strip() for part in re.split(pattern, stem) if part.strip()] if pattern else [stem]
+
+        def replace_part(match: re.Match) -> str:
+            index = int(match.group(1)) - 1
+            return parts[index] if 0 <= index < len(parts) else ""
+
+        rendered = str(template or "")
+        rendered = rendered.replace("{stem}", stem).replace("{name}", name).replace("{ext}", suffix)
+        rendered = re.sub(r"\{(\d+)\}", replace_part, rendered)
+        rendered = re.sub(r"\s+", " ", rendered).strip(" .-_")
+        new_name = cls.__safe_name(rendered)
+        if keep_extension and suffix and new_name and not new_name.casefold().endswith(suffix.casefold()):
+            new_name = cls.__safe_name(f"{new_name}{suffix}")
+        return parts, new_name
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
@@ -941,6 +1285,9 @@ class Transfer115(_PluginBase):
         ], self.__default_config()
 
     def get_page(self) -> List[dict]:
+        return []
+
+    def __get_legacy_page(self) -> List[dict]:
         status_section = self.__build_status_section()
         config_section = self.__build_config_section()
         browser_section = self.__build_browser_section()
@@ -1793,6 +2140,9 @@ class Transfer115(_PluginBase):
                 "rename_enabled": self._rename_enabled,
                 "rename_directories": self._rename_directories,
                 "rename_max_files": self._rename_max_files,
+                "split_delimiters": self._split_delimiters,
+                "split_template": self._split_template,
+                "split_keep_extension": self._split_keep_extension,
                 "onlyonce": onlyonce,
                 "link_input": link_input,
             }
@@ -1820,6 +2170,9 @@ class Transfer115(_PluginBase):
             "rename_enabled": True,
             "rename_directories": True,
             "rename_max_files": 200,
+            "split_delimiters": "",
+            "split_template": "{1} - {2}",
+            "split_keep_extension": True,
             "onlyonce": False,
             "link_input": "",
         }

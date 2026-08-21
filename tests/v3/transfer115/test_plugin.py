@@ -35,6 +35,26 @@ def test_safe_name_removes_path_characters() -> None:
     assert Transfer115._Transfer115__safe_name("../") == ""
 
 
+def test_mouse_selected_text_splits_and_rebuilds_filename() -> None:
+    """鼠标拖选的文字应按字面量拆分，模板重组后自动保留扩展名。"""
+    parts, new_name = Transfer115._Transfer115__split_filename(
+        "Show.Name.-.S01E02.1080p.mkv",
+        [".-."],
+        "{2} - {1}",
+        True,
+    )
+
+    assert parts == ["Show.Name", "S01E02.1080p"]
+    assert new_name == "S01E02.1080p - Show.Name.mkv"
+
+
+def test_split_tokens_supports_selected_pipe_text() -> None:
+    """保存格式不得把用户拖选的竖线误当成内部字段分隔符。"""
+    tokens = Transfer115._Transfer115__split_tokens('[" | ", "-"]')
+
+    assert tokens == [" | ", "-"]
+
+
 def test_rename_plan_expiration() -> None:
     """改名预览超过30分钟后必须失效。"""
     fresh = {
