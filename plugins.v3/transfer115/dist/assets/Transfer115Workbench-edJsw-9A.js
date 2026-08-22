@@ -100,6 +100,7 @@ const saving = ref(false);
 const error = ref('');
 const state = ref({ enabled: false, rename_enabled: false, download_path: '', config: {} });
 const directory = ref({ path: '/', parent: null, items: [] });
+const directoryLoaded = ref(false);
 const selectedPaths = ref([]);
 const samplePath = ref('');
 const sampleElement = ref(null);
@@ -187,6 +188,7 @@ async function loadDirectory(path = '') {
   try {
     const query = new URLSearchParams({ path: path || state.value.download_path || '/' });
     directory.value = assertResult(unwrap(await props.api.get(`${pluginBase.value}/file_manager?${query}`)));
+    directoryLoaded.value = true;
     selectedPaths.value = [];
     samplePath.value = files.value[0]?.path || '';
     preview.value = null;
@@ -195,6 +197,14 @@ async function loadDirectory(path = '') {
   } finally {
     loading.value = false;
   }
+}
+
+async function ensureDirectoryLoaded() {
+  if (
+    !directoryLoaded.value
+    && state.value.enabled
+    && state.value.config?.auth_mode !== 'cookie'
+  ) await loadDirectory(state.value.download_path || '/');
 }
 
 async function loadOfflineTasks({ quiet = false } = {}) {
@@ -264,7 +274,7 @@ async function initialize() {
     await loadState();
     if (state.value.enabled) {
       await loadOfflineTasks({ quiet: true });
-      if (state.value.config?.auth_mode !== 'cookie') await loadDirectory(state.value.download_path || '/');
+      if (activeTab.value === 'files') await ensureDirectoryLoaded();
     }
   } catch (err) {
     error.value = err?.message || '加载文件管理器失败';
@@ -367,6 +377,7 @@ async function saveSettings() {
     const result = assertResult(unwrap(await props.api.post(`${pluginBase.value}/settings`, payload)));
     state.value = result;
     settings.value = { ...(result.config || {}) };
+    directoryLoaded.value = false;
     notify(result.msg || '设置已保存');
   } catch (err) {
     notify(err?.message || '保存设置失败', 'error');
@@ -380,6 +391,9 @@ watch(sample, async () => {
   await nextTick();
 });
 watch([tokens, template, keepExtension], () => { preview.value = null; }, { deep: true });
+watch(activeTab, async (tab) => {
+  if (tab === 'files') await ensureDirectoryLoaded();
+});
 onMounted(initialize);
 
 return (_ctx, _cache) => {
@@ -417,20 +431,25 @@ return (_ctx, _cache) => {
         _createElementVNode("p", null, _toDisplayString(directory.value.path || state.value.download_path || '/'), 1)
       ]),
       _createElementVNode("div", _hoisted_2, [
-        _createVNode(_component_VTooltip, { text: "刷新目录" }, {
-          activator: _withCtx(({ props: tipProps }) => [
-            _createVNode(_component_VBtn, _mergeProps(tipProps, {
-              icon: "mdi-refresh",
-              variant: "text",
-              loading: loading.value,
-              onClick: _cache[0] || (_cache[0] = $event => (loadDirectory(directory.value.path)))
-            }), null, 16, ["loading"])
-          ]),
-          _: 1
-        }),
+        (activeTab.value === 'files')
+          ? (_openBlock(), _createBlock(_component_VTooltip, {
+              key: 0,
+              text: "刷新目录"
+            }, {
+              activator: _withCtx(({ props: tipProps }) => [
+                _createVNode(_component_VBtn, _mergeProps(tipProps, {
+                  icon: "mdi-refresh",
+                  variant: "text",
+                  loading: loading.value,
+                  onClick: _cache[0] || (_cache[0] = $event => (loadDirectory(directory.value.path)))
+                }), null, 16, ["loading"])
+              ]),
+              _: 1
+            }))
+          : _createCommentVNode("", true),
         (__props.showClose)
           ? (_openBlock(), _createBlock(_component_VBtn, {
-              key: 0,
+              key: 1,
               icon: "mdi-close",
               variant: "text",
               onClick: _cache[1] || (_cache[1] = $event => (_ctx.$emit('close')))
@@ -1169,6 +1188,6 @@ return (_ctx, _cache) => {
 }
 
 };
-const Transfer115Workbench = /*#__PURE__*/_export_sfc(_sfc_main, [['__scopeId',"data-v-f9519201"]]);
+const Transfer115Workbench = /*#__PURE__*/_export_sfc(_sfc_main, [['__scopeId',"data-v-53ac5d09"]]);
 
 export { Transfer115Workbench as T };

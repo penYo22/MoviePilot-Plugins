@@ -18,6 +18,7 @@ const saving = ref(false)
 const error = ref('')
 const state = ref({ enabled: false, rename_enabled: false, download_path: '', config: {} })
 const directory = ref({ path: '/', parent: null, items: [] })
+const directoryLoaded = ref(false)
 const selectedPaths = ref([])
 const samplePath = ref('')
 const sampleElement = ref(null)
@@ -105,6 +106,7 @@ async function loadDirectory(path = '') {
   try {
     const query = new URLSearchParams({ path: path || state.value.download_path || '/' })
     directory.value = assertResult(unwrap(await props.api.get(`${pluginBase.value}/file_manager?${query}`)))
+    directoryLoaded.value = true
     selectedPaths.value = []
     samplePath.value = files.value[0]?.path || ''
     preview.value = null
@@ -113,6 +115,14 @@ async function loadDirectory(path = '') {
   } finally {
     loading.value = false
   }
+}
+
+async function ensureDirectoryLoaded() {
+  if (
+    !directoryLoaded.value
+    && state.value.enabled
+    && state.value.config?.auth_mode !== 'cookie'
+  ) await loadDirectory(state.value.download_path || '/')
 }
 
 async function loadOfflineTasks({ quiet = false } = {}) {
@@ -182,7 +192,7 @@ async function initialize() {
     await loadState()
     if (state.value.enabled) {
       await loadOfflineTasks({ quiet: true })
-      if (state.value.config?.auth_mode !== 'cookie') await loadDirectory(state.value.download_path || '/')
+      if (activeTab.value === 'files') await ensureDirectoryLoaded()
     }
   } catch (err) {
     error.value = err?.message || '加载文件管理器失败'
@@ -285,6 +295,7 @@ async function saveSettings() {
     const result = assertResult(unwrap(await props.api.post(`${pluginBase.value}/settings`, payload)))
     state.value = result
     settings.value = { ...(result.config || {}) }
+    directoryLoaded.value = false
     notify(result.msg || '设置已保存')
   } catch (err) {
     notify(err?.message || '保存设置失败', 'error')
@@ -298,6 +309,9 @@ watch(sample, async () => {
   await nextTick()
 })
 watch([tokens, template, keepExtension], () => { preview.value = null }, { deep: true })
+watch(activeTab, async (tab) => {
+  if (tab === 'files') await ensureDirectoryLoaded()
+})
 onMounted(initialize)
 </script>
 
@@ -309,7 +323,7 @@ onMounted(initialize)
         <p>{{ directory.path || state.download_path || '/' }}</p>
       </div>
       <div class="transfer115-header__actions">
-        <VTooltip text="刷新目录">
+        <VTooltip v-if="activeTab === 'files'" text="刷新目录">
           <template #activator="{ props: tipProps }">
             <VBtn v-bind="tipProps" icon="mdi-refresh" variant="text" :loading="loading" @click="loadDirectory(directory.path)" />
           </template>
