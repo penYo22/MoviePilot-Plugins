@@ -69,9 +69,15 @@ const _hoisted_31 = {
   key: 1,
   class: "transfer115-preview-list"
 };
-const _hoisted_32 = { class: "transfer115-settings" };
-const _hoisted_33 = { class: "transfer115-settings-grid" };
-const _hoisted_34 = { class: "transfer115-settings-actions" };
+const _hoisted_32 = {
+  key: 3,
+  class: "transfer115-recognition-list"
+};
+const _hoisted_33 = { key: 0 };
+const _hoisted_34 = { key: 1 };
+const _hoisted_35 = { class: "transfer115-settings" };
+const _hoisted_36 = { class: "transfer115-settings-grid" };
+const _hoisted_37 = { class: "transfer115-settings-actions" };
 
 const {computed,inject,nextTick,onMounted,ref,watch} = await importShared('vue');
 
@@ -109,6 +115,7 @@ const tokens = ref([]);
 const template = ref('{1} - {2}');
 const keepExtension = ref(true);
 const preview = ref(null);
+const renameResult = ref(null);
 const confirmOpen = ref(false);
 const settings = ref({});
 const offlineLinks = ref('');
@@ -331,6 +338,7 @@ function insertPart(index) {
 async function testRename() {
   saving.value = true;
   error.value = '';
+  renameResult.value = null;
   try {
     preview.value = assertResult(unwrap(await props.api.post(`${pluginBase.value}/preview_custom_rename`, {
       selected_paths: selectedPaths.value,
@@ -355,6 +363,7 @@ async function applyRename() {
     })));
     confirmOpen.value = false;
     preview.value = null;
+    renameResult.value = result;
     await loadDirectory(directory.value.path);
     notify(result.msg || '改名完成');
     emit('action');
@@ -998,6 +1007,58 @@ return (_ctx, _cache) => {
                             ]))
                           }), 128))
                         ]))
+                      : _createCommentVNode("", true),
+                    (renameResult.value)
+                      ? (_openBlock(), _createBlock(_component_VAlert, {
+                          key: 2,
+                          type: renameResult.value.recognition_results?.some(item => item.matched) ? 'success' : 'warning',
+                          variant: "tonal",
+                          density: "compact",
+                          class: "transfer115-recognition-result"
+                        }, {
+                          default: _withCtx(() => [
+                            _createTextVNode(_toDisplayString(renameResult.value.msg), 1)
+                          ]),
+                          _: 1
+                        }, 8, ["type"]))
+                      : _createCommentVNode("", true),
+                    (renameResult.value?.recognition_results?.length)
+                      ? (_openBlock(), _createElementBlock("div", _hoisted_32, [
+                          (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(renameResult.value.recognition_results, (item) => {
+                            return (_openBlock(), _createElementBlock("article", {
+                              key: item.path,
+                              class: "transfer115-recognition-row"
+                            }, [
+                              _createVNode(_component_VIcon, {
+                                icon: item.matched ? (item.type === 'tv' ? 'mdi-television-play' : 'mdi-movie-open-outline') : 'mdi-help-circle-outline',
+                                color: item.matched ? 'success' : 'warning'
+                              }, null, 8, ["icon", "color"]),
+                              _createElementVNode("div", null, [
+                                _createElementVNode("strong", null, _toDisplayString(item.name), 1),
+                                (item.matched)
+                                  ? (_openBlock(), _createElementBlock("span", _hoisted_33, [
+                                      _createTextVNode(_toDisplayString(item.type_label), 1),
+                                      (item.episode_label)
+                                        ? (_openBlock(), _createElementBlock(_Fragment, { key: 0 }, [
+                                            _createTextVNode(" · " + _toDisplayString(item.episode_label), 1)
+                                          ], 64))
+                                        : _createCommentVNode("", true),
+                                      (item.title_year || item.title)
+                                        ? (_openBlock(), _createElementBlock(_Fragment, { key: 1 }, [
+                                            _createTextVNode(" · " + _toDisplayString(item.title_year || item.title), 1)
+                                          ], 64))
+                                        : _createCommentVNode("", true),
+                                      (item.tmdb_id)
+                                        ? (_openBlock(), _createElementBlock(_Fragment, { key: 2 }, [
+                                            _createTextVNode(" · TMDB " + _toDisplayString(item.tmdb_id), 1)
+                                          ], 64))
+                                        : _createCommentVNode("", true)
+                                    ]))
+                                  : (_openBlock(), _createElementBlock("span", _hoisted_34, _toDisplayString(item.error || 'TMDB 未命中电影或电视剧'), 1))
+                              ])
+                            ]))
+                          }), 128))
+                        ]))
                       : _createCommentVNode("", true)
                   ]),
                   _: 1
@@ -1009,10 +1070,10 @@ return (_ctx, _cache) => {
         }),
         _createVNode(_component_VWindowItem, { value: "config" }, {
           default: _withCtx(() => [
-            _createElementVNode("div", _hoisted_32, [
+            _createElementVNode("div", _hoisted_35, [
               _createVNode(_component_VSheet, { class: "transfer115-panel app-surface-static" }, {
                 default: _withCtx(() => [
-                  _createElementVNode("div", _hoisted_33, [
+                  _createElementVNode("div", _hoisted_36, [
                     _createVNode(_component_VSwitch, {
                       modelValue: settings.value.enabled,
                       "onUpdate:modelValue": _cache[11] || (_cache[11] = $event => ((settings.value.enabled) = $event)),
@@ -1108,7 +1169,7 @@ return (_ctx, _cache) => {
                       "hide-details": ""
                     }, null, 8, ["modelValue"])
                   ]),
-                  _createElementVNode("div", _hoisted_34, [
+                  _createElementVNode("div", _hoisted_37, [
                     _createVNode(_component_VBtn, {
                       color: "primary",
                       "prepend-icon": "mdi-content-save-outline",
@@ -1188,6 +1249,6 @@ return (_ctx, _cache) => {
 }
 
 };
-const Transfer115Workbench = /*#__PURE__*/_export_sfc(_sfc_main, [['__scopeId',"data-v-53ac5d09"]]);
+const Transfer115Workbench = /*#__PURE__*/_export_sfc(_sfc_main, [['__scopeId',"data-v-cf9e3d47"]]);
 
 export { Transfer115Workbench as T };

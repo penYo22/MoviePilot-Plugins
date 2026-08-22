@@ -121,6 +121,80 @@ def test_offline_task_view_normalizes_status_and_progress() -> None:
     assert failed["error"] == "链接失效"
 
 
+def test_renamed_file_tmdb_result_distinguishes_tv_and_movie(monkeypatch) -> None:
+    """改名后的文件名应通过MoviePilot识别链返回电影或电视剧类型。"""
+    from app.schemas.types import MediaSource, MediaType
+
+    recognized = SimpleNamespace(
+        type=MediaType.TV,
+        title="Example Show",
+        title_year="Example Show (2026)",
+        tmdb_id=123,
+        media_source=MediaSource.TMDB,
+        media_id="123",
+    )
+
+    class FakeMediaChain:
+        def recognize_by_path(self, path, media_source=None, obtain_images=False):
+            assert path == "/Downloads/Example Show S01E01.mkv"
+            assert media_source == MediaSource.TMDB
+            assert obtain_images is False
+            return SimpleNamespace(
+                meta_info=SimpleNamespace(begin_season=1, episode_list=[3]),
+                media_info=recognized,
+            )
+
+    import app.chain.media as media_module
+
+    monkeypatch.setattr(media_module, "MediaChain", FakeMediaChain)
+
+    plugin = object.__new__(Transfer115)
+    result = plugin._Transfer115__recognize_renamed_file(
+        "/Downloads/raw.mkv",
+        "Example Show S01E01.mkv",
+    )
+
+    assert result["matched"] is True
+    assert result["type"] == "tv"
+    assert result["type_label"] == "电视剧"
+    assert result["season"] == 1
+    assert result["episodes"] == [3]
+    assert result["episode_label"] == "第 1 季 · 第 3 集"
+    assert result["tmdb_id"] == "123"
+    assert result["path"] == "/Downloads/Example Show S01E01.mkv"
+
+
+def test_renamed_file_tmdb_miss_does_not_raise(monkeypatch) -> None:
+    """TMDB未命中时应返回未命中结果，不能影响已经完成的改名。"""
+    class FakeMediaChain:
+        def recognize_by_path(self, **_kwargs):
+            return SimpleNamespace(
+                meta_info=SimpleNamespace(begin_season=1, episode_list=[1]),
+                media_info=None,
+            )
+
+    import app.chain.media as media_module
+
+    monkeypatch.setattr(media_module, "MediaChain", FakeMediaChain)
+
+    plugin = object.__new__(Transfer115)
+    result = plugin._Transfer115__recognize_renamed_file("/Downloads/raw.mkv", "unknown.mkv")
+
+    assert result["matched"] is False
+    assert result["type_label"] == "未命中"
+    assert result["error"] == ""
+
+
+def test_format_episode_label_supports_single_and_multiple_episodes() -> None:
+    """电视剧季集应以简洁中文格式展示，电影不显示季集。"""
+    formatter = Transfer115._Transfer115__format_episode_label
+
+    assert formatter("tv", 1, [3]) == "第 1 季 · 第 3 集"
+    assert formatter("tv", 1, [3, 4, 5]) == "第 1 季 · 第 3-5 集"
+    assert formatter("tv", 1, [1, 3]) == "第 1 季 · 第 1、3 集"
+    assert formatter("movie", None, []) == ""
+
+
 def test_build_rename_plan_uses_media_identity_and_mp_name(monkeypatch) -> None:
     """预览应保存V3媒体身份，并使用MoviePilot推荐名称。"""
     root_item = SimpleNamespace(

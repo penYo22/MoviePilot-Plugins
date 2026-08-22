@@ -27,6 +27,7 @@ const tokens = ref([])
 const template = ref('{1} - {2}')
 const keepExtension = ref(true)
 const preview = ref(null)
+const renameResult = ref(null)
 const confirmOpen = ref(false)
 const settings = ref({})
 const offlineLinks = ref('')
@@ -249,6 +250,7 @@ function insertPart(index) {
 async function testRename() {
   saving.value = true
   error.value = ''
+  renameResult.value = null
   try {
     preview.value = assertResult(unwrap(await props.api.post(`${pluginBase.value}/preview_custom_rename`, {
       selected_paths: selectedPaths.value,
@@ -273,6 +275,7 @@ async function applyRename() {
     })))
     confirmOpen.value = false
     preview.value = null
+    renameResult.value = result
     await loadDirectory(directory.value.path)
     notify(result.msg || '改名完成')
     emit('action')
@@ -473,6 +476,19 @@ onMounted(initialize)
                   <small>拆分：{{ item.parts.join(' | ') }}</small>
                 </article>
               </div>
+              <VAlert v-if="renameResult" :type="renameResult.recognition_results?.some(item => item.matched) ? 'success' : 'warning'" variant="tonal" density="compact" class="transfer115-recognition-result">
+                {{ renameResult.msg }}
+              </VAlert>
+              <div v-if="renameResult?.recognition_results?.length" class="transfer115-recognition-list">
+                <article v-for="item in renameResult.recognition_results" :key="item.path" class="transfer115-recognition-row">
+                  <VIcon :icon="item.matched ? (item.type === 'tv' ? 'mdi-television-play' : 'mdi-movie-open-outline') : 'mdi-help-circle-outline'" :color="item.matched ? 'success' : 'warning'" />
+                  <div>
+                    <strong>{{ item.name }}</strong>
+                    <span v-if="item.matched">{{ item.type_label }}<template v-if="item.episode_label"> · {{ item.episode_label }}</template><template v-if="item.title_year || item.title"> · {{ item.title_year || item.title }}</template><template v-if="item.tmdb_id"> · TMDB {{ item.tmdb_id }}</template></span>
+                    <span v-else>{{ item.error || 'TMDB 未命中电影或电视剧' }}</span>
+                  </div>
+                </article>
+              </div>
             </VSheet>
           </main>
         </div>
@@ -577,6 +593,12 @@ onMounted(initialize)
 .transfer115-task-main > span { display: block; margin-block: 4px 6px; overflow-wrap: anywhere; font-size: .8rem; color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)); }
 .transfer115-task-main small { display: block; margin-block-start: 5px; overflow-wrap: anywhere; color: rgb(var(--v-theme-error)); }
 .transfer115-task-progress { min-inline-size: 42px; text-align: end; font-size: .8rem; color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)); }
+.transfer115-recognition-result { margin-block-start: 12px; }
+.transfer115-recognition-list { display: grid; gap: 6px; max-block-size: 260px; margin-block-start: 10px; overflow: auto; }
+.transfer115-recognition-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-block-end: 1px solid rgba(var(--v-border-color), .1); }
+.transfer115-recognition-row > div { display: flex; min-inline-size: 0; flex-direction: column; gap: 2px; }
+.transfer115-recognition-row strong, .transfer115-recognition-row span { overflow-wrap: anywhere; }
+.transfer115-recognition-row span { font-size: .8rem; color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)); }
 @media (max-width: 900px) {
   .transfer115-shell { padding: 12px; }
   .transfer115-workspace { grid-template-columns: 1fr; }

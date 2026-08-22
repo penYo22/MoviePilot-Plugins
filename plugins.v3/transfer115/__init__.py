@@ -13,18 +13,18 @@ from app.sdk.config import settings
 from app.sdk.logging import logger
 from app.sdk.media import MetaInfoPath
 from app.plugins import _PluginBase
-from app.schemas.types import NotificationType
+from app.schemas.types import MediaSource, MediaType, NotificationType
 
 
 class Transfer115(_PluginBase):
     # 插件名称
     plugin_name = "115离线下载"
     # 插件描述
-    plugin_desc = "使用MoviePilot内置115授权提交离线任务，并支持文件管理和自定义批量改名。"
+    plugin_desc = "使用MoviePilot内置115授权提交离线任务，支持文件管理、批量改名和改名后TMDB复核。"
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "5.1.2"
+    plugin_version = "5.2.0"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -509,6 +509,7 @@ class Transfer115(_PluginBase):
 
             storage_chain = StorageChain()
             success, failed = [], []
+            recognition_results = []
             for item in plan.get("items") or []:
                 old_name = str(item.get("name") or "")
                 new_name = self.__safe_name(item.get("new_name"))
@@ -532,15 +533,124 @@ class Transfer115(_PluginBase):
                     continue
                 self._sleep_if_needed()
                 if storage_chain.rename_file(current, new_name):
-                    success.append({"old_name": old_name, "new_name": new_name})
+                    result = {"old_name": old_name, "new_name": new_name}
+                    if item.get("type", "file") == "file":
+                        result["recognition"] = self.__recognize_renamed_file(path, new_name)
+                        recognition_results.append(result["recognition"])
+                    success.append(result)
                 else:
                     failed.append({"name": old_name, "msg": "115重命名接口返回失败"})
             self.del_data("split_rename_plan")
             self.__upsert_task_record("自定义拆分改名", f"完成 {len(success)} 个，失败 {len(failed)} 个")
-            return {"code": 0 if success or not failed else 1, "msg": f"改名完成：成功 {len(success)} 个，失败 {len(failed)} 个", "success": success, "failed": failed}
+            matched = sum(1 for item in recognition_results if item.get("matched"))
+            return {
+                "code": 0 if success or not failed else 1,
+                "msg": f"改名完成：成功 {len(success)} 个，失败 {len(failed)} 个；识别命中 {matched} 个",
+                "success": success,
+                "failed": failed,
+                "recognition_results": recognition_results,
+            }
         except Exception as e:
             logger.error(f"Transfer115: 执行自定义改名失败: {e}")
             return {"code": 1, "msg": str(e)}
+
+    def __recognize_renamed_file(self, old_path: str, new_name: str) -> dict:
+        """用改名后的文件名调用MoviePilot内置TMDB识别链。"""
+        parent = PurePosixPath(self.__clean_path(old_path)).parent.as_posix()
+        new_path = f"{parent.rstrip('/')}/{new_name}" if parent != "/" else f"/{new_name}"
+        result = {
+            "path": new_path,
+            "name": new_name,
+            "matched": False,
+            "type": "unknown",
+            "type_label": "未命中",
+            "season": None,
+            "episodes": [],
+            "episode_label": "",
+            "title": "",
+            "title_year": "",
+            "tmdb_id": "",
+            "media_source": "",
+            "error": "",
+        }
+        try:
+            from app.chain.media import MediaChain
+
+            # 复用 MoviePilot 文件识别入口，保持识别结果与内置文件管理器一致。
+            context = MediaChain().recognize_by_path(
+                new_path,
+                media_source=MediaSource.TMDB,
+                obtain_images=False,
+            )
+            meta = getattr(context, "meta_info", None) if context else None
+            mediainfo = getattr(context, "media_info", None) if context else None
+            if not mediainfo or getattr(mediainfo, "type", None) not in (MediaType.MOVIE, MediaType.TV):
+                return result
+            media_type = getattr(mediainfo, "type", None)
+            media_type_value = self.__display_value(media_type)
+            if media_type == MediaType.MOVIE or media_type_value in {"电影", "movie", "movies"}:
+                type_key = "movie"
+                type_label = "电影"
+            elif media_type == MediaType.TV or media_type_value in {"电视剧", "tv", "television"}:
+                type_key = "tv"
+                type_label = "电视剧"
+            else:
+                return result
+            season = getattr(mediainfo, "season", None)
+            if season is None:
+                season = getattr(meta, "begin_season", None)
+            episodes = list(getattr(meta, "episode_list", None) or [])
+            if not episodes:
+                episode = getattr(mediainfo, "episode", None)
+                if episode is not None:
+                    episodes = [episode]
+            normalized_episodes = []
+            for episode in episodes:
+                try:
+                    normalized_episodes.append(int(episode))
+                except (TypeError, ValueError):
+                    continue
+            normalized_episodes = list(dict.fromkeys(normalized_episodes))
+            try:
+                season = int(season) if season is not None else None
+            except (TypeError, ValueError):
+                season = None
+            result.update(
+                {
+                    "matched": True,
+                    "type": type_key,
+                    "type_label": type_label,
+                    "season": season,
+                    "episodes": normalized_episodes,
+                    "episode_label": self.__format_episode_label(type_key, season, normalized_episodes),
+                    "title": str(getattr(mediainfo, "title", "") or ""),
+                    "title_year": str(getattr(mediainfo, "title_year", "") or ""),
+                    "tmdb_id": str(getattr(mediainfo, "tmdb_id", None) or getattr(mediainfo, "media_id", "") or ""),
+                    "media_source": self.__display_value(getattr(mediainfo, "media_source", None)),
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Transfer115: 改名后TMDB识别失败 {new_path}: {e}")
+            result["error"] = str(e)
+        return result
+
+    @staticmethod
+    def __format_episode_label(type_key: str, season: Optional[int], episodes: List[int]) -> str:
+        """将识别出的季集整理成简洁的中文展示文本。"""
+        if type_key != "tv":
+            return ""
+        labels = []
+        if season is not None:
+            labels.append(f"第 {season} 季")
+        if episodes:
+            if len(episodes) == 1:
+                episode_text = str(episodes[0])
+            elif episodes == list(range(episodes[0], episodes[-1] + 1)):
+                episode_text = f"{episodes[0]}-{episodes[-1]}"
+            else:
+                episode_text = "、".join(str(episode) for episode in episodes)
+            labels.append(f"第 {episode_text} 集")
+        return " · ".join(labels)
 
     def api_set_download_path(self, path: str = "/") -> dict:
         return self.api_set_path(field="download_path", path=path)
@@ -705,6 +815,7 @@ class Transfer115(_PluginBase):
             storage_chain = StorageChain()
             success = []
             failed = []
+            recognition_results = []
             # 文件先改名，目录后改名，避免目录改名影响后续路径校验。
             items = sorted(
                 plan.get("items") or [],
@@ -748,17 +859,23 @@ class Transfer115(_PluginBase):
                 self._sleep_if_needed()
                 renamed = storage_chain.rename_file(current, new_name)
                 if renamed:
-                    success.append({"old_name": old_name, "new_name": new_name})
+                    result = {"old_name": old_name, "new_name": new_name}
+                    if item.get("type", "file") == "file":
+                        result["recognition"] = self.__recognize_renamed_file(path, new_name)
+                        recognition_results.append(result["recognition"])
+                    success.append(result)
                 else:
                     failed.append({"name": old_name, "msg": "115重命名接口返回失败"})
 
             self.del_data("rename_plan")
             self.__upsert_task_record("批量改名", f"完成 {len(success)} 个，失败 {len(failed)} 个")
+            matched = sum(1 for item in recognition_results if item.get("matched"))
             return {
                 "code": 0 if success or not failed else 1,
-                "msg": f"改名完成：成功 {len(success)} 个，失败 {len(failed)} 个",
+                "msg": f"改名完成：成功 {len(success)} 个，失败 {len(failed)} 个；识别命中 {matched} 个",
                 "success": success,
                 "failed": failed,
+                "recognition_results": recognition_results,
             }
         except Exception as e:
             logger.error(f"Transfer115: 执行批量改名失败: {e}")
