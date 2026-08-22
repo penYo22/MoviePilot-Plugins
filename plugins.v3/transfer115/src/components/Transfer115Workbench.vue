@@ -4,7 +4,7 @@ import { computed, inject, nextTick, onMounted, ref, watch } from 'vue'
 const props = defineProps({
   api: { type: Object, default: () => ({}) },
   pluginId: { type: String, default: 'Transfer115' },
-  initialTab: { type: String, default: 'files' },
+  initialTab: { type: String, default: 'offline' },
   showClose: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
 })
@@ -28,6 +28,9 @@ const keepExtension = ref(true)
 const preview = ref(null)
 const confirmOpen = ref(false)
 const settings = ref({})
+const offlineLinks = ref('')
+const offlineTasks = ref([])
+const offlineLoading = ref(false)
 
 const files = computed(() => directory.value.items.filter(item => item.type !== 'dir'))
 const folders = computed(() => directory.value.items.filter(item => item.type === 'dir'))
@@ -79,6 +82,14 @@ function formatBytes(value) {
   return `${(size / 1024 ** index).toFixed(index > 1 ? 1 : 0)} ${units[index]}`
 }
 
+function taskColor(status) {
+  return { completed: 'success', failed: 'error', downloading: 'info', unknown: 'secondary' }[status] || 'secondary'
+}
+
+function taskIcon(status) {
+  return { completed: 'mdi-check-circle-outline', failed: 'mdi-alert-circle-outline', downloading: 'mdi-download-circle-outline', unknown: 'mdi-help-circle-outline' }[status] || 'mdi-help-circle-outline'
+}
+
 async function loadState() {
   const data = assertResult(unwrap(await props.api.get(`${pluginBase.value}/plugin_state`)))
   state.value = data
@@ -104,11 +115,75 @@ async function loadDirectory(path = '') {
   }
 }
 
+async function loadOfflineTasks({ quiet = false } = {}) {
+  if (!state.value.enabled) return
+  offlineLoading.value = true
+  try {
+    const result = assertResult(unwrap(await props.api.get(`${pluginBase.value}/offline_tasks`)))
+    offlineTasks.value = result.tasks || []
+    if (!quiet) notify(result.msg || '离线任务已刷新', 'info')
+  } catch (err) {
+    if (!quiet) notify(err?.message || '读取离线任务失败', 'error')
+  } finally {
+    offlineLoading.value = false
+  }
+}
+
+async function submitOffline() {
+  if (!offlineLinks.value.trim()) {
+    notify('请先粘贴离线下载链接', 'warning')
+    return
+  }
+  saving.value = true
+  try {
+    const result = assertResult(unwrap(await props.api.post(`${pluginBase.value}/submit_offline`, {
+      links: offlineLinks.value,
+    })))
+    offlineLinks.value = ''
+    await loadOfflineTasks({ quiet: true })
+    notify(result.msg || '离线任务已提交')
+    emit('action')
+  } catch (err) {
+    notify(err?.message || '提交离线任务失败', 'error')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function checkOfflineTasks() {
+  offlineLoading.value = true
+  try {
+    const result = assertResult(unwrap(await props.api.get(`${pluginBase.value}/refresh_tasks`)))
+    offlineTasks.value = result.tasks || []
+    notify(result.msg || '任务检查完成')
+  } catch (err) {
+    notify(err?.message || '检查离线任务失败', 'error')
+  } finally {
+    offlineLoading.value = false
+  }
+}
+
+async function organizeDownloads() {
+  saving.value = true
+  try {
+    const result = assertResult(unwrap(await props.api.get(`${pluginBase.value}/organize_all`)))
+    notify(result.msg || '整理完成')
+    emit('action')
+  } catch (err) {
+    notify(err?.message || '整理下载目录失败', 'error')
+  } finally {
+    saving.value = false
+  }
+}
+
 async function initialize() {
   loading.value = true
   try {
     await loadState()
-    await loadDirectory(state.value.download_path || '/')
+    if (state.value.enabled) {
+      await loadOfflineTasks({ quiet: true })
+      if (state.value.config?.auth_mode !== 'cookie') await loadDirectory(state.value.download_path || '/')
+    }
   } catch (err) {
     error.value = err?.message || '加载文件管理器失败'
   } finally {
@@ -247,12 +322,61 @@ onMounted(initialize)
     <VAlert v-if="!state.enabled" type="warning" variant="tonal">插件尚未启用，请先到设置页启用。</VAlert>
 
     <VTabs v-model="activeTab" color="primary" class="transfer115-tabs">
+      <VTab value="offline">离线下载</VTab>
       <VTab value="files">文件改名</VTab>
       <VTab value="config">插件设置</VTab>
     </VTabs>
     <VDivider />
 
     <VWindow v-model="activeTab" :touch="false">
+      <VWindowItem value="offline">
+        <div class="transfer115-offline">
+          <VSheet tag="section" class="transfer115-panel app-surface-static">
+            <div class="transfer115-offline-head">
+              <div>
+                <div class="text-subtitle-1 font-weight-medium">添加离线下载</div>
+                <div class="text-body-2 text-medium-emphasis">每行一个磁力、ed2k、HTTP 或 115 分享链接</div>
+              </div>
+              <VChip :color="state.config?.auth_mode === 'cookie' ? 'warning' : 'success'" size="small" variant="tonal" prepend-icon="mdi-shield-check-outline">
+                {{ state.config?.auth_mode === 'cookie' ? 'Cookie授权' : 'MoviePilot 115授权' }}
+              </VChip>
+            </div>
+            <VTextarea v-model="offlineLinks" label="离线下载链接" rows="7" auto-grow variant="outlined" placeholder="magnet:?xt=urn:btih:...&#10;ed2k://..." />
+            <div class="transfer115-offline-target">
+              <VIcon icon="mdi-folder-download-outline" color="primary" />
+              <div><span>保存到</span><strong>{{ state.download_path || '115根目录' }}</strong></div>
+              <VBtn size="small" variant="text" @click="activeTab = 'config'">修改目录</VBtn>
+            </div>
+            <div class="transfer115-actions">
+              <VBtn color="primary" variant="flat" prepend-icon="mdi-download" :loading="saving" :disabled="!offlineLinks.trim() || !state.enabled" @click="submitOffline">提交离线任务</VBtn>
+              <VBtn variant="tonal" prepend-icon="mdi-refresh" :loading="offlineLoading" :disabled="!state.enabled" @click="loadOfflineTasks()">刷新列表</VBtn>
+              <VBtn color="info" variant="tonal" prepend-icon="mdi-progress-check" :loading="offlineLoading" :disabled="!state.enabled" @click="checkOfflineTasks">检查任务</VBtn>
+              <VBtn color="success" variant="tonal" prepend-icon="mdi-folder-move-outline" :loading="saving" :disabled="!state.enabled || !state.download_path" @click="organizeDownloads">整理下载目录</VBtn>
+            </div>
+          </VSheet>
+
+          <VSheet tag="section" class="transfer115-panel app-surface-static">
+            <div class="transfer115-panel-head transfer115-panel-head--plain">
+              <div><strong>离线任务</strong><span>最近 {{ offlineTasks.length }} 个任务</span></div>
+              <VProgressCircular v-if="offlineLoading" indeterminate size="22" width="2" color="primary" />
+            </div>
+            <div v-if="offlineTasks.length" class="transfer115-task-list">
+              <article v-for="task in offlineTasks" :key="task.id || `${task.name}-${task.created_at}`" class="transfer115-task-row">
+                <VIcon :icon="taskIcon(task.status)" :color="taskColor(task.status)" />
+                <div class="transfer115-task-main">
+                  <div><strong>{{ task.name || '未命名任务' }}</strong><VChip :color="taskColor(task.status)" size="x-small" variant="tonal">{{ task.status_label }}</VChip></div>
+                  <span>{{ task.save_path || state.download_path || '115根目录' }}<template v-if="task.size"> · {{ formatBytes(task.size) }}</template></span>
+                  <VProgressLinear v-if="task.status === 'downloading'" :model-value="task.progress" height="4" color="info" rounded />
+                  <small v-if="task.error">{{ task.error }}</small>
+                </div>
+                <span class="transfer115-task-progress">{{ task.status === 'downloading' ? `${task.progress}%` : '' }}</span>
+              </article>
+            </div>
+            <div v-else class="transfer115-empty">暂无离线任务</div>
+          </VSheet>
+        </div>
+      </VWindowItem>
+
       <VWindowItem value="files">
         <div class="transfer115-workspace">
           <VSheet tag="section" class="transfer115-browser app-surface-static">
@@ -422,6 +546,23 @@ onMounted(initialize)
 .transfer115-settings { max-inline-size: 1080px; padding-block-start: 16px; }
 .transfer115-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .transfer115-settings-actions { justify-content: flex-end; margin-block-start: 18px; }
+.transfer115-offline { display: grid; gap: 12px; padding-block-start: 16px; }
+.transfer115-offline-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-block-end: 14px; }
+.transfer115-offline-head > div { min-inline-size: 0; }
+.transfer115-offline-target { display: flex; align-items: center; gap: 10px; min-block-size: 44px; padding: 8px 12px; border-radius: 6px; background: rgba(var(--v-theme-primary), .06); }
+.transfer115-offline-target > div { display: flex; flex: 1; min-inline-size: 0; flex-direction: column; gap: 2px; }
+.transfer115-offline-target span { font-size: .78rem; color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)); }
+.transfer115-offline-target strong { overflow-wrap: anywhere; font-weight: 550; }
+.transfer115-panel-head--plain { margin: -16px -16px 0; }
+.transfer115-task-list { display: grid; gap: 0; }
+.transfer115-task-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 12px 0; border-block-end: 1px solid rgba(var(--v-border-color), .1); }
+.transfer115-task-row:last-child { border-block-end: 0; }
+.transfer115-task-main { min-inline-size: 0; }
+.transfer115-task-main > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.transfer115-task-main strong { min-inline-size: 0; overflow-wrap: anywhere; }
+.transfer115-task-main > span { display: block; margin-block: 4px 6px; overflow-wrap: anywhere; font-size: .8rem; color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)); }
+.transfer115-task-main small { display: block; margin-block-start: 5px; overflow-wrap: anywhere; color: rgb(var(--v-theme-error)); }
+.transfer115-task-progress { min-inline-size: 42px; text-align: end; font-size: .8rem; color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)); }
 @media (max-width: 900px) {
   .transfer115-shell { padding: 12px; }
   .transfer115-workspace { grid-template-columns: 1fr; }
@@ -434,5 +575,8 @@ onMounted(initialize)
   .transfer115-preview-list article { grid-template-columns: 1fr; }
   .transfer115-preview-list article :deep(.v-icon) { transform: rotate(90deg); }
   .transfer115-selection-bar { align-items: stretch; flex-direction: column; }
+  .transfer115-offline-head { flex-direction: column; }
+  .transfer115-offline-target { align-items: flex-start; }
+  .transfer115-offline-target :deep(.v-btn) { margin-inline-start: auto; }
 }
 </style>

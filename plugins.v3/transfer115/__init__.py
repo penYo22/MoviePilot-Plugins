@@ -20,11 +20,11 @@ class Transfer115(_PluginBase):
     # 插件名称
     plugin_name = "115离线下载"
     # 插件描述
-    plugin_desc = "提交115离线下载任务，支持文件勾选、自定义拆分测试和批量修改115文件名称。"
+    plugin_desc = "使用MoviePilot内置115授权提交离线任务，并支持文件管理和自定义批量改名。"
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "5.1.0"
+    plugin_version = "5.1.1"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -139,6 +139,20 @@ class Transfer115(_PluginBase):
                 "summary": "手动检查115离线任务",
             },
             {
+                "path": "/submit_offline",
+                "endpoint": self.api_submit_offline,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "提交115离线下载链接",
+            },
+            {
+                "path": "/offline_tasks",
+                "endpoint": self.api_offline_tasks,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "查询115离线下载任务",
+            },
+            {
                 "path": "/nav_dir",
                 "endpoint": self.api_nav_dir,
                 "methods": ["GET"],
@@ -242,7 +256,43 @@ class Transfer115(_PluginBase):
         if not self._enabled:
             return {"code": 1, "msg": "插件未启用"}
         self.__check_and_organize(force=True)
-        return {"code": 0, "msg": "任务检查已触发"}
+        result = self.api_offline_tasks()
+        result["msg"] = "任务检查完成"
+        return result
+
+    def api_submit_offline(self, payload: Optional[dict] = Body(default=None)) -> dict:
+        """通过MoviePilot内置115授权或Cookie客户端提交离线下载任务。"""
+        if not self._enabled:
+            return {"code": 1, "msg": "插件未启用"}
+        payload = payload or {}
+        raw_links = payload.get("links") or payload.get("urls") or ""
+        if isinstance(raw_links, list):
+            raw_links = "\n".join(str(link) for link in raw_links)
+        lines = self.__parse_links(str(raw_links))[:100]
+        if not lines:
+            return {"code": 1, "msg": "请填写磁力、ed2k、HTTP或115分享链接"}
+        return self.__submit_links(lines)
+
+    def api_offline_tasks(self) -> dict:
+        """返回适合工作台展示的115离线任务列表。"""
+        if not self._enabled:
+            return {"code": 1, "msg": "插件未启用", "tasks": []}
+        oper = self._get_cookie_oper() if self._auth_mode == "cookie" else self._get_u115_oper()
+        if not oper:
+            mode = "Cookie" if self._auth_mode == "cookie" else "MoviePilot内置115"
+            return {"code": 1, "msg": f"{mode}未授权或不可用", "tasks": []}
+        try:
+            tasks = [self.__offline_task_view(task) for task in self.__list_offline_tasks(oper)]
+            return {
+                "code": 0,
+                "msg": f"已读取 {len(tasks)} 个离线任务",
+                "tasks": tasks,
+                "download_path": self._download_path,
+                "auth_mode": self._auth_mode,
+            }
+        except Exception as e:
+            logger.warning(f"Transfer115: 查询离线任务失败: {e}")
+            return {"code": 1, "msg": str(e), "tasks": []}
 
     def api_nav_dir(self, path: str = "/") -> dict:
         self.save_data("browse_path", self.__clean_path(path, default="/"))
@@ -1362,12 +1412,13 @@ class Transfer115(_PluginBase):
             logger.warning(f"Transfer115: Cookie模式获取目录ID失败: {e}")
             return None
 
-    def __submit_links(self, lines: List[str]) -> bool:
+    def __submit_links(self, lines: List[str]) -> dict:
         oper = self._get_cookie_oper() if self._auth_mode == "cookie" else self._get_u115_oper()
         if not oper:
-            logger.warning("Transfer115: 115未授权或Cookie无效，无法提交链接")
+            message = "115未授权或Cookie无效，无法提交链接"
+            logger.warning(f"Transfer115: {message}")
             self.__upsert_task_record("离线任务提交", "提交失败")
-            return False
+            return {"code": 1, "msg": message, "submitted": 0}
 
         try:
             wp_path_id = self.__resolve_download_folder_id(oper)
@@ -1377,9 +1428,19 @@ class Transfer115(_PluginBase):
 
             self._sleep_if_needed()
             if self._auth_mode == "cookie":
-                oper.offline_add_urls(payload)
+                response = oper.offline_add_urls(payload)
+                # 旧版 p115client 可能以 None 表示请求完成；只有明确的失败响应才拒绝。
+                error = "" if response is None else self.__offline_response_error(response)
             else:
-                oper._request_api("POST", "/open/offline/add_task_urls", data=payload)
+                # 复用MoviePilot内置U115Pan的授权、限流、Token刷新和错误处理。
+                response = oper._request_api(
+                    "POST",
+                    "/open/offline/add_task_urls",
+                    data=payload,
+                )
+                error = self.__offline_response_error(response)
+            if error:
+                raise RuntimeError(error)
 
             logger.info(f"Transfer115: 添加离线任务成功，共 {len(lines)} 条")
             self.__record_recent_tasks(oper)
@@ -1389,7 +1450,12 @@ class Transfer115(_PluginBase):
                     title="115离线任务已提交",
                     text=f"已提交 {len(lines)} 条离线下载任务",
                 )
-            return True
+            return {
+                "code": 0,
+                "msg": f"已提交 {len(lines)} 条离线下载任务",
+                "submitted": len(lines),
+                "download_path": self._download_path or "/",
+            }
         except Exception as e:
             logger.error(f"Transfer115: 添加离线任务失败: {e}")
             self.__upsert_task_record("离线任务提交", "提交失败")
@@ -1399,7 +1465,21 @@ class Transfer115(_PluginBase):
                     title="115离线任务提交失败",
                     text=str(e),
                 )
-            return False
+            return {"code": 1, "msg": f"离线任务提交失败: {e}", "submitted": 0}
+
+    @staticmethod
+    def __offline_response_error(response: Any) -> str:
+        """统一判断内置U115Pan与p115client的离线提交响应。"""
+        if response is None or response is False:
+            return "115接口未返回成功结果"
+        if not isinstance(response, dict):
+            return ""
+        if response.get("state") is False or response.get("success") is False:
+            return str(response.get("message") or response.get("error") or "115接口返回失败")
+        code = response.get("code")
+        if code not in (None, 0, "0", 20004, "20004"):
+            return str(response.get("message") or response.get("error") or f"115错误码: {code}")
+        return ""
 
     def __resolve_download_folder_id(self, oper) -> Optional[int]:
         if not self._download_path:
@@ -1647,6 +1727,8 @@ class Transfer115(_PluginBase):
         if not isinstance(resp, dict):
             return []
         data = resp.get("data")
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
         if isinstance(data, dict):
             tasks = data.get("tasks") or data.get("list") or data.get("items")
             if isinstance(tasks, list):
@@ -1669,6 +1751,51 @@ class Transfer115(_PluginBase):
     @staticmethod
     def __task_name(task: dict) -> str:
         return str(task.get("name") or task.get("file_name") or task.get("title") or Transfer115.__task_key(task))
+
+    @classmethod
+    def __offline_task_view(cls, task: dict) -> dict:
+        """把不同115客户端返回的任务结构归一化为前端展示模型。"""
+        raw_status = task.get("status", task.get("state", ""))
+        status_text = str(raw_status or "").strip().lower()
+        if cls.__is_task_finished(task):
+            status = "completed"
+            status_label = "已完成"
+        elif raw_status in (-1, 3, 4) or status_text in {"-1", "failed", "error", "failure"}:
+            status = "failed"
+            status_label = "失败"
+        elif raw_status in (0, 1) or status_text in {"0", "1", "waiting", "pending", "downloading", "running"}:
+            status = "downloading"
+            status_label = "下载中"
+        else:
+            status = "unknown"
+            status_label = str(raw_status or "未知")
+
+        progress = task.get("percentDone", task.get("progress", task.get("percent", 0)))
+        try:
+            progress_value = float(progress or 0)
+            if 0 < progress_value <= 1:
+                progress_value *= 100
+            progress_value = max(0, min(100, round(progress_value, 1)))
+        except (TypeError, ValueError):
+            progress_value = 0
+
+        size = task.get("size") or task.get("file_size") or 0
+        try:
+            size = int(size)
+        except (TypeError, ValueError):
+            size = 0
+
+        return {
+            "id": cls.__task_key(task),
+            "name": cls.__task_name(task),
+            "status": status,
+            "status_label": status_label,
+            "progress": progress_value,
+            "size": size,
+            "save_path": str(task.get("file_path") or task.get("save_path") or ""),
+            "created_at": str(task.get("create_time") or task.get("created_at") or task.get("time") or ""),
+            "error": str(task.get("error_msg") or task.get("message") or task.get("error") or ""),
+        }
 
     @staticmethod
     def __is_task_finished(task: dict) -> bool:

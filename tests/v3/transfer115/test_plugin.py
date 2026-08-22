@@ -86,6 +86,41 @@ def test_apply_requires_exact_preview_id() -> None:
     assert "重新扫描" in result["msg"]
 
 
+def test_offline_api_routes_are_registered() -> None:
+    """离线工作台所需的提交和任务查询接口必须继续暴露。"""
+    plugin = object.__new__(Transfer115)
+    routes = {route["path"] for route in plugin.get_api()}
+
+    assert "/submit_offline" in routes
+    assert "/offline_tasks" in routes
+
+
+def test_offline_response_error_accepts_mp_success_and_rejects_failure() -> None:
+    """内置115 API的成功响应应通过，失败响应应给出错误信息。"""
+    error = Transfer115._Transfer115__offline_response_error
+
+    assert error({"code": 0, "state": True}) == ""
+    assert error({"code": 20004, "state": True}) == ""
+    assert "余额不足" in error({"code": 10001, "message": "余额不足"})
+    assert error(None)
+
+
+def test_offline_task_view_normalizes_status_and_progress() -> None:
+    """不同115任务字段应统一为工作台可直接展示的状态模型。"""
+    view = Transfer115._Transfer115__offline_task_view
+
+    downloading = view({"id": "a", "name": "Movie", "status": 1, "percent": 0.25, "size": "1024"})
+    completed = view({"id": "b", "title": "Done", "status": 2})
+    failed = view({"id": "c", "name": "Bad", "status": "failed", "error_msg": "链接失效"})
+
+    assert downloading["status"] == "downloading"
+    assert downloading["progress"] == 25
+    assert downloading["size"] == 1024
+    assert completed["status"] == "completed"
+    assert failed["status"] == "failed"
+    assert failed["error"] == "链接失效"
+
+
 def test_build_rename_plan_uses_media_identity_and_mp_name(monkeypatch) -> None:
     """预览应保存V3媒体身份，并使用MoviePilot推荐名称。"""
     root_item = SimpleNamespace(
