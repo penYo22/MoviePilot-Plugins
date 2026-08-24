@@ -474,6 +474,11 @@ onMounted(initialize)
                 <article v-for="item in preview.items" :key="item.path">
                   <span>{{ item.name }}</span><VIcon icon="mdi-arrow-right" size="small" /><strong>{{ item.new_name }}</strong>
                   <small>拆分：{{ item.parts.join(' | ') }}</small>
+                  <div v-if="item.recognition" class="transfer115-preview-recognition" :class="item.recognition.matched ? 'is-matched' : 'is-unmatched'">
+                    <VIcon :icon="item.recognition.matched ? (item.recognition.type === 'tv' ? 'mdi-television-play' : 'mdi-movie-open-outline') : 'mdi-help-circle-outline'" size="small" />
+                    <span v-if="item.recognition.matched">{{ item.recognition.type_label }}<template v-if="item.recognition.episode_label"> · {{ item.recognition.episode_label }}</template><template v-if="item.recognition.title_year || item.recognition.title"> · {{ item.recognition.title_year || item.recognition.title }}</template><template v-if="item.recognition.tmdb_id"> · TMDB {{ item.recognition.tmdb_id }}</template></span>
+                    <span v-else>{{ item.recognition.error || 'MoviePilot 未识别到电影或电视剧' }}</span>
+                  </div>
                 </article>
               </div>
               <VAlert v-if="renameResult" :type="renameResult.recognition_results?.some(item => item.matched) ? 'success' : 'warning'" variant="tonal" density="compact" class="transfer115-recognition-result">
@@ -572,6 +577,10 @@ onMounted(initialize)
 .transfer115-preview-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity)); border-radius: 6px; }
 .transfer115-preview-list span, .transfer115-preview-list strong { min-inline-size: 0; overflow-wrap: anywhere; }
 .transfer115-preview-list small { grid-column: 1 / -1; color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)); }
+.transfer115-preview-recognition { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; min-inline-size: 0; font-size: .8rem; }
+.transfer115-preview-recognition span { overflow-wrap: anywhere; }
+.transfer115-preview-recognition.is-matched { color: rgb(var(--v-theme-success)); }
+.transfer115-preview-recognition.is-unmatched { color: rgb(var(--v-theme-warning)); }
 .transfer115-loading, .transfer115-empty { display: grid; place-items: center; min-block-size: 120px; color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)); }
 .transfer115-settings { max-inline-size: 1080px; padding-block-start: 16px; }
 .transfer115-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }

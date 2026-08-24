@@ -185,6 +185,60 @@ def test_renamed_file_tmdb_miss_does_not_raise(monkeypatch) -> None:
     assert result["error"] == ""
 
 
+def test_preview_custom_rename_returns_native_recognition(monkeypatch) -> None:
+    """测试改名时应直接返回MoviePilot内置识别结果。"""
+    from app.schemas.types import MediaSource, MediaType
+
+    class FakeStorageChain:
+        @staticmethod
+        def get_item(_item):
+            return SimpleNamespace(fileid="11")
+
+    recognized = SimpleNamespace(
+        type=MediaType.TV,
+        title="Example Show",
+        title_year="Example Show (2026)",
+        tmdb_id=123,
+        media_source=MediaSource.TMDB,
+        media_id="123",
+    )
+
+    class FakeMediaChain:
+        def recognize_by_path(self, path, media_source=None, obtain_images=False):
+            assert path == "/Downloads/Example Show S01E03.mkv"
+            return SimpleNamespace(
+                meta_info=SimpleNamespace(begin_season=1, episode_list=[3]),
+                media_info=recognized,
+            )
+
+    import app.chain.media as media_module
+    import app.chain.storage as storage_module
+
+    monkeypatch.setattr(media_module, "MediaChain", FakeMediaChain)
+    monkeypatch.setattr(storage_module, "StorageChain", FakeStorageChain)
+
+    plugin = object.__new__(Transfer115)
+    plugin._enabled = True
+    plugin._rename_enabled = True
+    plugin._rename_max_files = 20
+    plugin._split_template = "{1}"
+    plugin._split_keep_extension = True
+    plugin.save_data = lambda _key, _value: None
+    result = plugin.api_preview_custom_rename(
+        payload={
+            "selected_paths": ["/Downloads/raw.Example Show.mkv"],
+            "split_tokens": ["."],
+            "template": "{2} S01E03",
+            "keep_extension": True,
+        }
+    )
+
+    assert result["code"] == 0
+    assert result["recognition_results"][0]["type_label"] == "电视剧"
+    assert result["recognition_results"][0]["episode_label"] == "第 1 季 · 第 3 集"
+    assert result["items"][0]["recognition"]["tmdb_id"] == "123"
+
+
 def test_format_episode_label_supports_single_and_multiple_episodes() -> None:
     """电视剧季集应以简洁中文格式展示，电影不显示季集。"""
     formatter = Transfer115._Transfer115__format_episode_label

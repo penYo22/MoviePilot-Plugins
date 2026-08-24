@@ -20,11 +20,11 @@ class Transfer115(_PluginBase):
     # 插件名称
     plugin_name = "115离线下载"
     # 插件描述
-    plugin_desc = "使用MoviePilot内置115授权提交离线任务，支持文件管理、批量改名和改名后TMDB复核。"
+    plugin_desc = "使用MoviePilot内置115授权提交离线任务，支持文件管理、批量改名、测试识别和改名后TMDB复核。"
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "5.2.0"
+    plugin_version = "5.2.1"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -445,6 +445,7 @@ class Transfer115(_PluginBase):
             storage_chain = StorageChain()
             preview_items = []
             errors = []
+            recognition_results = []
             target_keys = set()
             for path in paths:
                 old_name = PurePosixPath(path).name
@@ -463,20 +464,23 @@ class Transfer115(_PluginBase):
                     errors.append({"path": path, "msg": f"生成了重复名称: {new_name}"})
                     continue
                 target_keys.add(target_key)
-                preview_items.append(
-                    {
-                        "type": "file",
-                        "path": path,
-                        "fileid": str(current.fileid or ""),
-                        "name": old_name,
-                        "parts": parts,
-                        "new_name": new_name,
-                        "unchanged": old_name == new_name,
-                    }
-                )
+                item = {
+                    "type": "file",
+                    "path": path,
+                    "fileid": str(current.fileid or ""),
+                    "name": old_name,
+                    "parts": parts,
+                    "new_name": new_name,
+                    "unchanged": old_name == new_name,
+                }
+                item["recognition"] = self.__recognize_renamed_file(path, new_name)
+                recognition_results.append(item["recognition"])
+                preview_items.append(item)
+            matched = sum(1 for item in recognition_results if item.get("matched"))
             plan = {
                 "code": 0 if preview_items else 1,
-                "msg": f"已测试 {len(preview_items)} 个文件，可改名 {sum(not item['unchanged'] for item in preview_items)} 个",
+                "msg": f"已测试 {len(preview_items)} 个文件，可改名 {sum(not item['unchanged'] for item in preview_items)} 个；识别命中 {matched} 个",
+                "recognition_results": recognition_results,
                 "plan_id": uuid.uuid4().hex,
                 "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
                 "tokens": tokens,

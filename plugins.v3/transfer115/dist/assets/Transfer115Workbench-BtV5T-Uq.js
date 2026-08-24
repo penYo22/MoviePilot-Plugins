@@ -69,15 +69,17 @@ const _hoisted_31 = {
   key: 1,
   class: "transfer115-preview-list"
 };
-const _hoisted_32 = {
+const _hoisted_32 = { key: 0 };
+const _hoisted_33 = { key: 1 };
+const _hoisted_34 = {
   key: 3,
   class: "transfer115-recognition-list"
 };
-const _hoisted_33 = { key: 0 };
-const _hoisted_34 = { key: 1 };
-const _hoisted_35 = { class: "transfer115-settings" };
-const _hoisted_36 = { class: "transfer115-settings-grid" };
-const _hoisted_37 = { class: "transfer115-settings-actions" };
+const _hoisted_35 = { key: 0 };
+const _hoisted_36 = { key: 1 };
+const _hoisted_37 = { class: "transfer115-settings" };
+const _hoisted_38 = { class: "transfer115-settings-grid" };
+const _hoisted_39 = { class: "transfer115-settings-actions" };
 
 const {computed,inject,nextTick,onMounted,ref,watch} = await importShared('vue');
 
@@ -1003,7 +1005,38 @@ return (_ctx, _cache) => {
                                 size: "small"
                               }),
                               _createElementVNode("strong", null, _toDisplayString(item.new_name), 1),
-                              _createElementVNode("small", null, "拆分：" + _toDisplayString(item.parts.join(' | ')), 1)
+                              _createElementVNode("small", null, "拆分：" + _toDisplayString(item.parts.join(' | ')), 1),
+                              (item.recognition)
+                                ? (_openBlock(), _createElementBlock("div", {
+                                    key: 0,
+                                    class: _normalizeClass(["transfer115-preview-recognition", item.recognition.matched ? 'is-matched' : 'is-unmatched'])
+                                  }, [
+                                    _createVNode(_component_VIcon, {
+                                      icon: item.recognition.matched ? (item.recognition.type === 'tv' ? 'mdi-television-play' : 'mdi-movie-open-outline') : 'mdi-help-circle-outline',
+                                      size: "small"
+                                    }, null, 8, ["icon"]),
+                                    (item.recognition.matched)
+                                      ? (_openBlock(), _createElementBlock("span", _hoisted_32, [
+                                          _createTextVNode(_toDisplayString(item.recognition.type_label), 1),
+                                          (item.recognition.episode_label)
+                                            ? (_openBlock(), _createElementBlock(_Fragment, { key: 0 }, [
+                                                _createTextVNode(" · " + _toDisplayString(item.recognition.episode_label), 1)
+                                              ], 64))
+                                            : _createCommentVNode("", true),
+                                          (item.recognition.title_year || item.recognition.title)
+                                            ? (_openBlock(), _createElementBlock(_Fragment, { key: 1 }, [
+                                                _createTextVNode(" · " + _toDisplayString(item.recognition.title_year || item.recognition.title), 1)
+                                              ], 64))
+                                            : _createCommentVNode("", true),
+                                          (item.recognition.tmdb_id)
+                                            ? (_openBlock(), _createElementBlock(_Fragment, { key: 2 }, [
+                                                _createTextVNode(" · TMDB " + _toDisplayString(item.recognition.tmdb_id), 1)
+                                              ], 64))
+                                            : _createCommentVNode("", true)
+                                        ]))
+                                      : (_openBlock(), _createElementBlock("span", _hoisted_33, _toDisplayString(item.recognition.error || 'MoviePilot 未识别到电影或电视剧'), 1))
+                                  ], 2))
+                                : _createCommentVNode("", true)
                             ]))
                           }), 128))
                         ]))
@@ -1023,7 +1056,7 @@ return (_ctx, _cache) => {
                         }, 8, ["type"]))
                       : _createCommentVNode("", true),
                     (renameResult.value?.recognition_results?.length)
-                      ? (_openBlock(), _createElementBlock("div", _hoisted_32, [
+                      ? (_openBlock(), _createElementBlock("div", _hoisted_34, [
                           (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(renameResult.value.recognition_results, (item) => {
                             return (_openBlock(), _createElementBlock("article", {
                               key: item.path,
@@ -1036,7 +1069,7 @@ return (_ctx, _cache) => {
                               _createElementVNode("div", null, [
                                 _createElementVNode("strong", null, _toDisplayString(item.name), 1),
                                 (item.matched)
-                                  ? (_openBlock(), _createElementBlock("span", _hoisted_33, [
+                                  ? (_openBlock(), _createElementBlock("span", _hoisted_35, [
                                       _createTextVNode(_toDisplayString(item.type_label), 1),
                                       (item.episode_label)
                                         ? (_openBlock(), _createElementBlock(_Fragment, { key: 0 }, [
@@ -1054,7 +1087,7 @@ return (_ctx, _cache) => {
                                           ], 64))
                                         : _createCommentVNode("", true)
                                     ]))
-                                  : (_openBlock(), _createElementBlock("span", _hoisted_34, _toDisplayString(item.error || 'TMDB 未命中电影或电视剧'), 1))
+                                  : (_openBlock(), _createElementBlock("span", _hoisted_36, _toDisplayString(item.error || 'TMDB 未命中电影或电视剧'), 1))
                               ])
                             ]))
                           }), 128))
@@ -1070,10 +1103,10 @@ return (_ctx, _cache) => {
         }),
         _createVNode(_component_VWindowItem, { value: "config" }, {
           default: _withCtx(() => [
-            _createElementVNode("div", _hoisted_35, [
+            _createElementVNode("div", _hoisted_37, [
               _createVNode(_component_VSheet, { class: "transfer115-panel app-surface-static" }, {
                 default: _withCtx(() => [
-                  _createElementVNode("div", _hoisted_36, [
+                  _createElementVNode("div", _hoisted_38, [
                     _createVNode(_component_VSwitch, {
                       modelValue: settings.value.enabled,
                       "onUpdate:modelValue": _cache[11] || (_cache[11] = $event => ((settings.value.enabled) = $event)),
@@ -1169,7 +1202,7 @@ return (_ctx, _cache) => {
                       "hide-details": ""
                     }, null, 8, ["modelValue"])
                   ]),
-                  _createElementVNode("div", _hoisted_37, [
+                  _createElementVNode("div", _hoisted_39, [
                     _createVNode(_component_VBtn, {
                       color: "primary",
                       "prepend-icon": "mdi-content-save-outline",
@@ -1249,6 +1282,6 @@ return (_ctx, _cache) => {
 }
 
 };
-const Transfer115Workbench = /*#__PURE__*/_export_sfc(_sfc_main, [['__scopeId',"data-v-cf9e3d47"]]);
+const Transfer115Workbench = /*#__PURE__*/_export_sfc(_sfc_main, [['__scopeId',"data-v-e906de03"]]);
 
 export { Transfer115Workbench as T };
