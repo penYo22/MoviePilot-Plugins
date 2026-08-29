@@ -20,11 +20,11 @@ class Transfer115(_PluginBase):
     # 插件名称
     plugin_name = "115离线下载"
     # 插件描述
-    plugin_desc = "使用MoviePilot内置115授权提交离线任务，支持文件管理、批量改名、测试识别和改名后TMDB复核。"
+    plugin_desc = "使用MoviePilot内置115授权提交离线任务，内嵌自带文件管理器勾选文件，支持批量改名、测试识别和改名后TMDB复核。"
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "5.2.1"
+    plugin_version = "5.3.0"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页

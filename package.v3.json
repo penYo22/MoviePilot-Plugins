@@ -1,14 +1,15 @@
 {
     "Transfer115": {
         "name": "115离线下载",
-        "description": "提交115离线任务，自动整理，并通过文件管理器勾选、鼠标拖选拆分和批量修改115文件名称。",
+        "description": "提交115离线任务，自动整理，并通过MoviePilot自带文件管理器勾选、鼠标拖选拆分和批量修改115文件名称。",
         "labels": "115,离线下载,云盘,文件管理,识别,批量改名",
-        "version": "5.2.1",
+        "version": "5.3.0",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "penYo22",
         "level": 1,
         "system_version": ">=3.0.0",
         "history": {
+            "v5.3.0": "文件管理器改为内嵌MoviePilot自带文件管理页：浏览、勾选更流畅，勾选结果可一键同步到插件改名面板。",
             "v5.2.1": "修复测试改名不返回媒体信息：测试阶段直接调用MoviePilot内置文件识别并展示电影、电视剧、季集和TMDB ID。",
             "v5.2.0": "新增改名测试和改名后TMDB复核：调用MoviePilot内置识别链，显示电影、电视剧、季集、未命中状态及TMDB ID。",
             "v5.1.2": "优化文件管理器加载：打开离线下载页时不再提前查询115文件目录，切换到文件改名页后才按需加载。",

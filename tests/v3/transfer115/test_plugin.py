@@ -167,7 +167,7 @@ def test_renamed_file_tmdb_result_distinguishes_tv_and_movie(monkeypatch) -> Non
 def test_renamed_file_tmdb_miss_does_not_raise(monkeypatch) -> None:
     """TMDB未命中时应返回未命中结果，不能影响已经完成的改名。"""
     class FakeMediaChain:
-        def recognize_by_path(self, **_kwargs):
+        def recognize_by_path(self, *_args, **_kwargs):
             return SimpleNamespace(
                 meta_info=SimpleNamespace(begin_season=1, episode_list=[1]),
                 media_info=None,

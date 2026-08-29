@@ -18,7 +18,6 @@ const saving = ref(false)
 const error = ref('')
 const state = ref({ enabled: false, rename_enabled: false, download_path: '', config: {} })
 const directory = ref({ path: '/', parent: null, items: [] })
-const directoryLoaded = ref(false)
 const selectedPaths = ref([])
 const samplePath = ref('')
 const sampleElement = ref(null)
@@ -33,12 +32,19 @@ const settings = ref({})
 const offlineLinks = ref('')
 const offlineTasks = ref([])
 const offlineLoading = ref(false)
+const fileBrowserRef = ref(null)
+const builtinPath = ref('/')
+const builtinReady = ref(false)
+const builtinFrameKey = ref(0)
 
 const files = computed(() => directory.value.items.filter(item => item.type !== 'dir'))
-const folders = computed(() => directory.value.items.filter(item => item.type === 'dir'))
 const selectedFiles = computed(() => files.value.filter(item => selectedPaths.value.includes(item.path)))
-const sample = computed(() => files.value.find(item => item.path === samplePath.value) || selectedFiles.value[0] || files.value[0] || null)
-const allFilesSelected = computed(() => files.value.length > 0 && files.value.every(item => selectedPaths.value.includes(item.path)))
+const selectedFileItems = computed(() => selectedPaths.value.map(path => ({ path, name: baseName(path), size: 0, type: 'file' })))
+const sample = computed(() => files.value.find(item => item.path === samplePath.value) || selectedFiles.value[0] || selectedFileItems.value[0] || files.value[0] || null)
+const builtinFileManagerUrl = computed(() => {
+  const base = window.location.href.split('#')[0] || '/'
+  return `${base}#/filemanager`
+})
 const sampleExtension = computed(() => {
   const name = sample.value?.name || ''
   const index = name.lastIndexOf('.')
@@ -76,6 +82,88 @@ function notify(message, color = 'success') {
   else if (method === 'error') error.value = message
 }
 
+function baseName(path) {
+  const clean = String(path || '').replace(/\/+$/, '')
+  return clean.split('/').pop() || ''
+}
+
+function joinPath(path, name) {
+  const base = String(path || '/').replace(/\/+$/, '') || ''
+  return `${base}/${name}`
+}
+
+function readBuiltinPath(doc) {
+  const toolbar = doc.querySelector('.file-browser-toolbar')
+  if (!toolbar) return null
+  const segments = Array.from(toolbar.querySelectorAll('button.v-btn'))
+    .map(button => (button.textContent || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .slice(1)
+  return segments.length ? `/${segments.join('/')}/` : '/'
+}
+
+function readBuiltinCheckedNames(doc) {
+  const names = []
+  const inputs = Array.from(doc.querySelectorAll('.file-list-container input[type="checkbox"]'))
+  for (const input of inputs) {
+    if (!input.checked) continue
+    const title = input.closest('.v-list-item')?.querySelector('.v-list-item-title')
+    const name = title?.textContent?.trim()
+    if (name && !names.includes(name)) names.push(name)
+  }
+  return names
+}
+
+function onBuiltinLoaded() {
+  builtinReady.value = true
+}
+
+function reloadBuiltinFileManager() {
+  builtinFrameKey.value += 1
+  builtinReady.value = false
+}
+
+function openBuiltinInNewTab() {
+  window.open(builtinFileManagerUrl.value, '_blank')
+}
+
+async function syncSelectedFromBuiltin() {
+  const frame = fileBrowserRef.value
+  const doc = frame?.contentDocument || frame?.contentWindow?.document
+  if (!doc) {
+    notify('无法读取MoviePilot自带文件管理器', 'error')
+    return
+  }
+
+  const names = readBuiltinCheckedNames(doc)
+  if (!names.length) {
+    notify('请先在自带文件管理器中勾选要改名的文件', 'warning')
+    return
+  }
+
+  const path = readBuiltinPath(doc) || directory.value.path || state.value.download_path || '/'
+  builtinPath.value = path
+  try {
+    const loaded = await loadDirectory(path, { clearSelection: false })
+    if (!loaded) throw new Error('读取115目录失败')
+    const byName = new Map(files.value.map(item => [item.name, item]))
+    const matched = names
+      .map(name => byName.get(name)?.path || joinPath(path, name))
+      .filter(Boolean)
+    selectedPaths.value = [...new Set(matched)]
+    samplePath.value = selectedPaths.value[0] || files.value[0]?.path || ''
+    preview.value = null
+    notify(`已同步 ${selectedPaths.value.length} 个勾选文件`)
+  } catch (err) {
+    selectedPaths.value = [...new Set(names.map(name => joinPath(path, name)))]
+    samplePath.value = selectedPaths.value[0] || ''
+    builtinPath.value = path
+    directory.value.path = path
+    preview.value = null
+    notify(`已同步 ${selectedPaths.value.length} 个勾选文件`)
+  }
+}
+
 function formatBytes(value) {
   const size = Number(value || 0)
   if (!size) return '-'
@@ -96,34 +184,32 @@ async function loadState() {
   const data = assertResult(unwrap(await props.api.get(`${pluginBase.value}/plugin_state`)))
   state.value = data
   settings.value = { ...(data.config || {}) }
+  directory.value.path = data.download_path || '/'
   tokens.value = [...(data.split_tokens || [])]
   template.value = data.split_template || '{1} - {2}'
   keepExtension.value = data.split_keep_extension !== false
 }
 
-async function loadDirectory(path = '') {
+async function loadDirectory(path = '', { clearSelection = true } = {}) {
   loading.value = true
   error.value = ''
+  const target = path || state.value.download_path || '/'
   try {
-    const query = new URLSearchParams({ path: path || state.value.download_path || '/' })
+    directory.value = { path: target, parent: null, items: [] }
+    const query = new URLSearchParams({ path: target })
     directory.value = assertResult(unwrap(await props.api.get(`${pluginBase.value}/file_manager?${query}`)))
-    directoryLoaded.value = true
-    selectedPaths.value = []
-    samplePath.value = files.value[0]?.path || ''
+    if (clearSelection) {
+      selectedPaths.value = []
+      samplePath.value = files.value[0]?.path || ''
+    }
     preview.value = null
+    return true
   } catch (err) {
     error.value = err?.message || '读取115目录失败'
+    return false
   } finally {
     loading.value = false
   }
-}
-
-async function ensureDirectoryLoaded() {
-  if (
-    !directoryLoaded.value
-    && state.value.enabled
-    && state.value.config?.auth_mode !== 'cookie'
-  ) await loadDirectory(state.value.download_path || '/')
 }
 
 async function loadOfflineTasks({ quiet = false } = {}) {
@@ -193,27 +279,12 @@ async function initialize() {
     await loadState()
     if (state.value.enabled) {
       await loadOfflineTasks({ quiet: true })
-      if (activeTab.value === 'files') await ensureDirectoryLoaded()
     }
   } catch (err) {
     error.value = err?.message || '加载文件管理器失败'
   } finally {
     loading.value = false
   }
-}
-
-function toggleFile(path) {
-  preview.value = null
-  selectedPaths.value = selectedPaths.value.includes(path)
-    ? selectedPaths.value.filter(item => item !== path)
-    : [...selectedPaths.value, path]
-  if (!samplePath.value || !selectedPaths.value.includes(samplePath.value)) samplePath.value = selectedPaths.value[0] || path
-}
-
-function toggleAllFiles() {
-  preview.value = null
-  selectedPaths.value = allFilesSelected.value ? [] : files.value.map(item => item.path)
-  samplePath.value = selectedPaths.value[0] || files.value[0]?.path || ''
 }
 
 function captureSelection() {
@@ -277,6 +348,7 @@ async function applyRename() {
     preview.value = null
     renameResult.value = result
     await loadDirectory(directory.value.path)
+    reloadBuiltinFileManager()
     notify(result.msg || '改名完成')
     emit('action')
   } catch (err) {
@@ -298,7 +370,9 @@ async function saveSettings() {
     const result = assertResult(unwrap(await props.api.post(`${pluginBase.value}/settings`, payload)))
     state.value = result
     settings.value = { ...(result.config || {}) }
-    directoryLoaded.value = false
+    directory.value.path = result.download_path || result.config?.download_path || directory.value.path || '/'
+    builtinPath.value = directory.value.path
+    reloadBuiltinFileManager()
     notify(result.msg || '设置已保存')
   } catch (err) {
     notify(err?.message || '保存设置失败', 'error')
@@ -312,9 +386,6 @@ watch(sample, async () => {
   await nextTick()
 })
 watch([tokens, template, keepExtension], () => { preview.value = null }, { deep: true })
-watch(activeTab, async (tab) => {
-  if (tab === 'files') await ensureDirectoryLoaded()
-})
 onMounted(initialize)
 </script>
 
@@ -326,9 +397,9 @@ onMounted(initialize)
         <p>{{ directory.path || state.download_path || '/' }}</p>
       </div>
       <div class="transfer115-header__actions">
-        <VTooltip v-if="activeTab === 'files'" text="刷新目录">
+        <VTooltip v-if="activeTab === 'files'" text="刷新文件管理器">
           <template #activator="{ props: tipProps }">
-            <VBtn v-bind="tipProps" icon="mdi-refresh" variant="text" :loading="loading" @click="loadDirectory(directory.path)" />
+            <VBtn v-bind="tipProps" icon="mdi-refresh" variant="text" :disabled="!builtinReady" @click="reloadBuiltinFileManager" />
           </template>
         </VTooltip>
         <VBtn v-if="showClose" icon="mdi-close" variant="text" @click="$emit('close')" />
@@ -399,41 +470,23 @@ onMounted(initialize)
           <VSheet tag="section" class="transfer115-browser app-surface-static">
             <div class="transfer115-panel-head">
               <div>
-                <strong>选择文件</strong>
-                <span>已选 {{ selectedPaths.length }} 个</span>
+                <strong>MoviePilot 文件管理器</strong>
+                <span>{{ builtinPath || directory.path || state.download_path || '/' }}</span>
               </div>
-              <VBtn size="small" variant="text" :disabled="!files.length" @click="toggleAllFiles">
-                {{ allFilesSelected ? '取消全选' : '全选文件' }}
-              </VBtn>
-            </div>
-
-            <div class="transfer115-breadcrumb">
-              <VBtn v-if="directory.parent !== null" icon="mdi-arrow-up" size="small" variant="text" @click="loadDirectory(directory.parent)" />
-              <VIcon v-else icon="mdi-cloud-outline" size="small" />
-              <span>{{ directory.path }}</span>
-            </div>
-
-            <div v-if="loading" class="transfer115-loading"><VProgressCircular indeterminate color="primary" /></div>
-            <div v-else class="transfer115-file-list">
-              <button v-for="folder in folders" :key="folder.path" type="button" class="transfer115-file-row" @click="loadDirectory(folder.path)">
-                <VIcon icon="mdi-folder-outline" color="warning" />
-                <span class="transfer115-file-name">{{ folder.name }}</span>
-                <VIcon icon="mdi-chevron-right" size="small" />
-              </button>
-              <div v-for="file in files" :key="file.path" class="transfer115-file-row transfer115-file-row--selectable" :class="{ 'transfer115-file-row--selected': selectedPaths.includes(file.path) }">
-                <VCheckboxBtn :model-value="selectedPaths.includes(file.path)" @click.prevent="toggleFile(file.path)" />
-                <button type="button" class="transfer115-file-main" @click.prevent="samplePath = file.path">
-                  <span class="transfer115-file-name">{{ file.name }}</span>
-                  <small>{{ formatBytes(file.size) }}</small>
-                </button>
-                <VTooltip text="设为拆分样例">
-                  <template #activator="{ props: tipProps }">
-                    <VBtn v-bind="tipProps" :icon="sample?.path === file.path ? 'mdi-text-box-check-outline' : 'mdi-text-box-outline'" size="small" variant="text" @click.prevent="samplePath = file.path" />
-                  </template>
-                </VTooltip>
+              <div class="transfer115-browser-actions">
+                <VBtn size="small" variant="tonal" prepend-icon="mdi-checkbox-multiple-marked-outline" :loading="loading" :disabled="!builtinReady" @click="syncSelectedFromBuiltin">读取勾选</VBtn>
+                <VBtn size="small" variant="text" icon="mdi-refresh" :disabled="!builtinReady" @click="reloadBuiltinFileManager" />
+                <VBtn size="small" variant="text" icon="mdi-open-in-new" :disabled="!builtinReady" @click="openBuiltinInNewTab" />
               </div>
-              <div v-if="!folders.length && !files.length" class="transfer115-empty">当前目录为空</div>
             </div>
+            <iframe
+              :key="builtinFrameKey"
+              ref="fileBrowserRef"
+              class="transfer115-builtin-frame"
+              :src="builtinFileManagerUrl"
+              title="MoviePilot 文件管理器"
+              @load="onBuiltinLoaded"
+            />
           </VSheet>
 
           <main class="transfer115-editor">
@@ -547,7 +600,9 @@ onMounted(initialize)
 .transfer115-tabs { margin-block-start: 8px; }
 .transfer115-workspace { display: grid; grid-template-columns: minmax(290px, 0.8fr) minmax(0, 1.2fr); gap: 16px; padding-block-start: 16px; }
 .transfer115-browser, .transfer115-panel { border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity)); border-radius: 8px; }
-.transfer115-browser { min-block-size: 620px; overflow: hidden; }
+.transfer115-browser { min-block-size: 620px; display: flex; flex-direction: column; overflow: hidden; }
+.transfer115-browser-actions { display: flex; align-items: center; gap: 8px; }
+.transfer115-builtin-frame { display: block; flex: 1; min-block-size: 560px; border: 0; background: rgb(var(--v-theme-surface)); }
 .transfer115-panel-head { min-block-size: 58px; padding: 12px 14px; border-block-end: 1px solid rgba(var(--v-border-color), var(--v-border-opacity)); }
 .transfer115-panel-head > div { display: flex; flex-direction: column; }
 .transfer115-panel-head span { font-size: .78rem; color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)); }
