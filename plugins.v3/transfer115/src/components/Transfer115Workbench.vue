@@ -4,7 +4,7 @@ import { computed, inject, nextTick, onMounted, ref, watch } from 'vue'
 const props = defineProps({
   api: { type: Object, default: () => ({}) },
   pluginId: { type: String, default: 'Transfer115' },
-  initialTab: { type: String, default: 'offline' },
+  initialTab: { type: String, default: 'files' },
   showClose: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
 })
@@ -277,7 +277,7 @@ async function initialize() {
   loading.value = true
   try {
     await loadState()
-    if (state.value.enabled) {
+    if (state.value.enabled && activeTab.value === 'offline') {
       await loadOfflineTasks({ quiet: true })
     }
   } catch (err) {
@@ -386,6 +386,9 @@ watch(sample, async () => {
   await nextTick()
 })
 watch([tokens, template, keepExtension], () => { preview.value = null }, { deep: true })
+watch(activeTab, async (tab) => {
+  if (tab === 'offline' && state.value.enabled) await loadOfflineTasks({ quiet: true })
+})
 onMounted(initialize)
 </script>
 
@@ -410,61 +413,13 @@ onMounted(initialize)
     <VAlert v-if="!state.enabled" type="warning" variant="tonal">插件尚未启用，请先到设置页启用。</VAlert>
 
     <VTabs v-model="activeTab" color="primary" class="transfer115-tabs">
-      <VTab value="offline">离线下载</VTab>
       <VTab value="files">文件改名</VTab>
+      <VTab value="offline">离线下载</VTab>
       <VTab value="config">插件设置</VTab>
     </VTabs>
     <VDivider />
 
     <VWindow v-model="activeTab" :touch="false">
-      <VWindowItem value="offline">
-        <div class="transfer115-offline">
-          <VSheet tag="section" class="transfer115-panel app-surface-static">
-            <div class="transfer115-offline-head">
-              <div>
-                <div class="text-subtitle-1 font-weight-medium">添加离线下载</div>
-                <div class="text-body-2 text-medium-emphasis">每行一个磁力、ed2k、HTTP 或 115 分享链接</div>
-              </div>
-              <VChip :color="state.config?.auth_mode === 'cookie' ? 'warning' : 'success'" size="small" variant="tonal" prepend-icon="mdi-shield-check-outline">
-                {{ state.config?.auth_mode === 'cookie' ? 'Cookie授权' : 'MoviePilot 115授权' }}
-              </VChip>
-            </div>
-            <VTextarea v-model="offlineLinks" label="离线下载链接" rows="7" auto-grow variant="outlined" placeholder="magnet:?xt=urn:btih:...&#10;ed2k://..." />
-            <div class="transfer115-offline-target">
-              <VIcon icon="mdi-folder-download-outline" color="primary" />
-              <div><span>保存到</span><strong>{{ state.download_path || '115根目录' }}</strong></div>
-              <VBtn size="small" variant="text" @click="activeTab = 'config'">修改目录</VBtn>
-            </div>
-            <div class="transfer115-actions">
-              <VBtn color="primary" variant="flat" prepend-icon="mdi-download" :loading="saving" :disabled="!offlineLinks.trim() || !state.enabled" @click="submitOffline">提交离线任务</VBtn>
-              <VBtn variant="tonal" prepend-icon="mdi-refresh" :loading="offlineLoading" :disabled="!state.enabled" @click="loadOfflineTasks()">刷新列表</VBtn>
-              <VBtn color="info" variant="tonal" prepend-icon="mdi-progress-check" :loading="offlineLoading" :disabled="!state.enabled" @click="checkOfflineTasks">检查任务</VBtn>
-              <VBtn color="success" variant="tonal" prepend-icon="mdi-folder-move-outline" :loading="saving" :disabled="!state.enabled || !state.download_path" @click="organizeDownloads">整理下载目录</VBtn>
-            </div>
-          </VSheet>
-
-          <VSheet tag="section" class="transfer115-panel app-surface-static">
-            <div class="transfer115-panel-head transfer115-panel-head--plain">
-              <div><strong>离线任务</strong><span>最近 {{ offlineTasks.length }} 个任务</span></div>
-              <VProgressCircular v-if="offlineLoading" indeterminate size="22" width="2" color="primary" />
-            </div>
-            <div v-if="offlineTasks.length" class="transfer115-task-list">
-              <article v-for="task in offlineTasks" :key="task.id || `${task.name}-${task.created_at}`" class="transfer115-task-row">
-                <VIcon :icon="taskIcon(task.status)" :color="taskColor(task.status)" />
-                <div class="transfer115-task-main">
-                  <div><strong>{{ task.name || '未命名任务' }}</strong><VChip :color="taskColor(task.status)" size="x-small" variant="tonal">{{ task.status_label }}</VChip></div>
-                  <span>{{ task.save_path || state.download_path || '115根目录' }}<template v-if="task.size"> · {{ formatBytes(task.size) }}</template></span>
-                  <VProgressLinear v-if="task.status === 'downloading'" :model-value="task.progress" height="4" color="info" rounded />
-                  <small v-if="task.error">{{ task.error }}</small>
-                </div>
-                <span class="transfer115-task-progress">{{ task.status === 'downloading' ? `${task.progress}%` : '' }}</span>
-              </article>
-            </div>
-            <div v-else class="transfer115-empty">暂无离线任务</div>
-          </VSheet>
-        </div>
-      </VWindowItem>
-
       <VWindowItem value="files">
         <div class="transfer115-workspace">
           <VSheet tag="section" class="transfer115-browser app-surface-static">
@@ -549,6 +504,54 @@ onMounted(initialize)
               </div>
             </VSheet>
           </main>
+        </div>
+      </VWindowItem>
+
+      <VWindowItem value="offline">
+        <div class="transfer115-offline">
+          <VSheet tag="section" class="transfer115-panel app-surface-static">
+            <div class="transfer115-offline-head">
+              <div>
+                <div class="text-subtitle-1 font-weight-medium">添加离线下载</div>
+                <div class="text-body-2 text-medium-emphasis">每行一个磁力、ed2k、HTTP 或 115 分享链接</div>
+              </div>
+              <VChip :color="state.config?.auth_mode === 'cookie' ? 'warning' : 'success'" size="small" variant="tonal" prepend-icon="mdi-shield-check-outline">
+                {{ state.config?.auth_mode === 'cookie' ? 'Cookie授权' : 'MoviePilot 115授权' }}
+              </VChip>
+            </div>
+            <VTextarea v-model="offlineLinks" label="离线下载链接" rows="7" auto-grow variant="outlined" placeholder="magnet:?xt=urn:btih:...&#10;ed2k://..." />
+            <div class="transfer115-offline-target">
+              <VIcon icon="mdi-folder-download-outline" color="primary" />
+              <div><span>保存到</span><strong>{{ state.download_path || '115根目录' }}</strong></div>
+              <VBtn size="small" variant="text" @click="activeTab = 'config'">修改目录</VBtn>
+            </div>
+            <div class="transfer115-actions">
+              <VBtn color="primary" variant="flat" prepend-icon="mdi-download" :loading="saving" :disabled="!offlineLinks.trim() || !state.enabled" @click="submitOffline">提交离线任务</VBtn>
+              <VBtn variant="tonal" prepend-icon="mdi-refresh" :loading="offlineLoading" :disabled="!state.enabled" @click="loadOfflineTasks()">刷新列表</VBtn>
+              <VBtn color="info" variant="tonal" prepend-icon="mdi-progress-check" :loading="offlineLoading" :disabled="!state.enabled" @click="checkOfflineTasks">检查任务</VBtn>
+              <VBtn color="success" variant="tonal" prepend-icon="mdi-folder-move-outline" :loading="saving" :disabled="!state.enabled || !state.download_path" @click="organizeDownloads">整理下载目录</VBtn>
+            </div>
+          </VSheet>
+
+          <VSheet tag="section" class="transfer115-panel app-surface-static">
+            <div class="transfer115-panel-head transfer115-panel-head--plain">
+              <div><strong>离线任务</strong><span>最近 {{ offlineTasks.length }} 个任务</span></div>
+              <VProgressCircular v-if="offlineLoading" indeterminate size="22" width="2" color="primary" />
+            </div>
+            <div v-if="offlineTasks.length" class="transfer115-task-list">
+              <article v-for="task in offlineTasks" :key="task.id || `${task.name}-${task.created_at}`" class="transfer115-task-row">
+                <VIcon :icon="taskIcon(task.status)" :color="taskColor(task.status)" />
+                <div class="transfer115-task-main">
+                  <div><strong>{{ task.name || '未命名任务' }}</strong><VChip :color="taskColor(task.status)" size="x-small" variant="tonal">{{ task.status_label }}</VChip></div>
+                  <span>{{ task.save_path || state.download_path || '115根目录' }}<template v-if="task.size"> · {{ formatBytes(task.size) }}</template></span>
+                  <VProgressLinear v-if="task.status === 'downloading'" :model-value="task.progress" height="4" color="info" rounded />
+                  <small v-if="task.error">{{ task.error }}</small>
+                </div>
+                <span class="transfer115-task-progress">{{ task.status === 'downloading' ? `${task.progress}%` : '' }}</span>
+              </article>
+            </div>
+            <div v-else class="transfer115-empty">暂无离线任务</div>
+          </VSheet>
         </div>
       </VWindowItem>
 

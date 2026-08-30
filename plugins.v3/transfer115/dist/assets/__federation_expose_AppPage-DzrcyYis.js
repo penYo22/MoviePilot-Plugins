@@ -1,5 +1,5 @@
 import { importShared } from './__federation_fn_import-JrT3xvdd.js';
-import { T as Transfer115Workbench } from './Transfer115Workbench-DV3aZav7.js';
+import { T as Transfer115Workbench } from './Transfer115Workbench-C1kowCpy.js';
 
 const {openBlock:_openBlock,createBlock:_createBlock} = await importShared('vue');
 
