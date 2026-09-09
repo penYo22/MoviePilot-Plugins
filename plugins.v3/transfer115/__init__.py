@@ -21,11 +21,11 @@ class Transfer115(_PluginBase):
     # 插件名称
     plugin_name = "115离线下载"
     # 插件描述
-    plugin_desc = "使用MoviePilot内置115授权提交离线任务，内嵌自带文件管理器勾选文件，支持批量改名、测试识别和改名后TMDB复核。"
+    plugin_desc = "使用MoviePilot内置115授权提交离线任务，内嵌自带文件管理器勾选文件，支持批量改名、测试识别、改名后TMDB复核和整理后原文件夹归档。"
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "5.3.4"
+    plugin_version = "5.3.5"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -44,6 +44,7 @@ class Transfer115(_PluginBase):
     _download_path: str = ""
     _library_path: str = ""
     _fail_path: str = ""
+    _redundant_path: str = ""
     _auth_mode: str = "mp_oauth"
     _cookie: str = ""
     _transfer_type: str = "move"
@@ -75,6 +76,7 @@ class Transfer115(_PluginBase):
         self._download_path = self.__clean_path(config.get("download_path") or "")
         self._library_path = self.__clean_path(config.get("library_path") or "")
         self._fail_path = self.__clean_path(config.get("fail_path") or "")
+        self._redundant_path = self.__clean_path(config.get("redundant_path") or "")
         self._transfer_type = config.get("transfer_type", "move") or "move"
         self._poll_interval = self.__safe_int(config.get("poll_interval"), 5, 1, 1440)
         self._api_interval = self.__safe_int(config.get("api_interval"), 1, 0, 3600)
@@ -318,6 +320,7 @@ class Transfer115(_PluginBase):
                 "download_path": self._download_path,
                 "library_path": self._library_path,
                 "fail_path": self._fail_path,
+                "redundant_path": self._redundant_path,
                 "transfer_type": self._transfer_type,
                 "poll_interval": self._poll_interval,
                 "api_interval": self._api_interval,
@@ -348,6 +351,7 @@ class Transfer115(_PluginBase):
         self._download_path = self.__clean_path(payload.get("download_path", self._download_path))
         self._library_path = self.__clean_path(payload.get("library_path", self._library_path))
         self._fail_path = self.__clean_path(payload.get("fail_path", self._fail_path))
+        self._redundant_path = self.__clean_path(payload.get("redundant_path", self._redundant_path))
         transfer_type = str(payload.get("transfer_type") or self._transfer_type)
         self._transfer_type = transfer_type if transfer_type in {"move", "copy"} else "move"
         self._poll_interval = self.__safe_int(payload.get("poll_interval"), self._poll_interval, 1, 1440)
@@ -662,7 +666,7 @@ class Transfer115(_PluginBase):
         return self.api_set_path(field="download_path", path=path)
 
     def api_set_path(self, field: str = "", path: str = "/") -> dict:
-        if field not in ("download_path", "library_path", "fail_path"):
+        if field not in ("download_path", "library_path", "fail_path", "redundant_path"):
             return {"code": 1, "msg": "无效字段"}
 
         clean_path = self.__clean_path(path, default="/")
@@ -672,6 +676,9 @@ class Transfer115(_PluginBase):
         elif field == "library_path":
             self._library_path = clean_path
             label = "媒体库目录"
+        elif field == "redundant_path":
+            self._redundant_path = clean_path
+            label = "冗余数据目录"
         else:
             self._fail_path = clean_path
             label = "失败目录"
@@ -753,12 +760,15 @@ class Transfer115(_PluginBase):
         folder_name = fileitem.name or Path(folder_path).name
         if state:
             self.__upsert_task_record(folder_name, "整理完成")
-            cleaned = self.__cleanup_source_folder(fileitem)
+            cleaned, cleanup_msg = self.__cleanup_source_folder(fileitem)
             msg = f"整理成功: {folder_name}"
-            if self._transfer_type == "copy":
+            if self._redundant_path:
+                if cleanup_msg:
+                    msg += f"（{cleanup_msg}）"
+            elif self._transfer_type == "copy":
                 msg += "（当前为复制模式，源文件保留）"
             elif not cleaned:
-                msg += "（源目录仍包含媒体文件或暂时无法清理，已保留）"
+                msg += f"（{cleanup_msg}）"
             return {"code": 0, "msg": msg}
 
         self.__upsert_task_record(folder_name, "整理失败")
@@ -1321,6 +1331,25 @@ class Transfer115(_PluginBase):
                         "content": [
                             {
                                 "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "redundant_path",
+                                            "label": "冗余数据目录",
+                                            "placeholder": "整理完成后原文件夹移入此目录",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
                                 "props": {"cols": 12, "md": 3},
                                 "content": [
                                     {
@@ -1781,12 +1810,17 @@ class Transfer115(_PluginBase):
         state, errmsg = self.__manual_transfer_fileitem(fileitem=fileitem)
         if state:
             logger.info(f"Transfer115: 整理成功: {task_name}")
-            self.__cleanup_source_folder(fileitem)
+            cleaned, cleanup_msg = self.__cleanup_source_folder(fileitem)
+            if cleanup_msg:
+                if cleaned:
+                    logger.info(f"Transfer115: {cleanup_msg}")
+                else:
+                    logger.warning(f"Transfer115: {cleanup_msg}")
             if self._notify_enabled:
                 self.post_message(
                     mtype=NotificationType.Organize,
                     title="115离线整理完成",
-                    text=f"✅ {task_name}",
+                    text=f"✅ {task_name}\n{cleanup_msg}" if cleanup_msg else f"✅ {task_name}",
                 )
             return True
 
@@ -1854,10 +1888,82 @@ class Transfer115(_PluginBase):
         except Exception as e:
             logger.error(f"Transfer115: 移动失败目录异常 ({task_name}): {e}")
 
-    def __cleanup_source_folder(self, fileitem) -> bool:
-        """移动模式整理成功后清理已无媒体文件的源目录。"""
+    def __cleanup_source_folder(self, fileitem) -> Tuple[bool, str]:
+        """整理成功后处理原目录：配置了冗余目录则整目录移入，否则按旧逻辑清理。"""
+        if self._redundant_path:
+            return self.__move_source_to_redundant(fileitem)
+        return self.__cleanup_empty_source_folder(fileitem)
+
+    def __move_source_to_redundant(self, fileitem) -> Tuple[bool, str]:
+        """把整理完成后的原文件夹整体移入冗余数据目录。"""
+        try:
+            from app.chain.storage import StorageChain
+
+            redundant_path = self.__clean_path(self._redundant_path)
+            storage_chain = StorageChain()
+            self._sleep_if_needed()
+            current = storage_chain.get_item(fileitem)
+            if not current:
+                return True, "原文件夹已不存在"
+
+            current_path = self.__clean_path(str(getattr(current, "path", "") or ""))
+            source_root = current_path.rstrip("/") or "/"
+            dest_root = redundant_path.rstrip("/") or "/"
+            if source_root != "/" and (
+                dest_root == source_root or dest_root.startswith(f"{source_root}/")
+            ):
+                return False, "冗余数据目录不能是原文件夹或其子目录"
+
+            oper = self._get_u115_oper()
+            if not oper:
+                return False, "未获取到MoviePilot内置115授权，无法移动原文件夹"
+
+            self._sleep_if_needed()
+            dest_folder = oper.get_folder(Path(dest_root))
+            if not dest_folder or getattr(dest_folder, "type", "dir") != "dir":
+                return False, "无法创建或定位冗余数据目录"
+
+            name = str(current.name or PurePosixPath(current_path).name)
+            new_name = self.__unique_remote_name(storage_chain, dest_folder, name)
+            self._sleep_if_needed()
+            moved = oper.move(current, Path(dest_root), new_name)
+            if not moved:
+                return False, f"移动原文件夹失败: {current_path}"
+
+            display_path = f"{dest_root}/{new_name}" if dest_root != "/" else f"/{new_name}"
+            logger.info(f"Transfer115: 整理完成，原文件夹已移至冗余目录: {display_path}")
+            return True, f"原文件夹已移至冗余目录: {display_path}"
+        except Exception as e:
+            logger.warning(f"Transfer115: 移动原文件夹到冗余目录失败: {e}")
+            return False, f"移动原文件夹到冗余目录失败: {e}"
+
+    def __unique_remote_name(self, storage_chain, parent_fileitem, name: str) -> str:
+        """冗余目录已有同名目录时生成带时间戳的新名称，避免移动失败。"""
+        if not name:
+            return name
+        try:
+            self._sleep_if_needed()
+            children = storage_chain.list_files(parent_fileitem) or []
+            names = {str(item.name or "").strip() for item in children}
+            if name not in names:
+                return name
+            stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            candidate = f"{name}_{stamp}"
+            if candidate not in names:
+                return candidate
+            for index in range(1, 100):
+                candidate = f"{name}_{stamp}_{index}"
+                if candidate not in names:
+                    return candidate
+            return candidate
+        except Exception as e:
+            logger.debug(f"Transfer115: 检查冗余目录同名失败，按原名称移动: {e}")
+            return name
+
+    def __cleanup_empty_source_folder(self, fileitem) -> Tuple[bool, str]:
+        """未配置冗余目录时，移动模式整理成功后清理已无媒体文件的源目录。"""
         if not self._cleanup_empty_folder or self._transfer_type != "move":
-            return True
+            return True, ""
         try:
             from app.chain.storage import StorageChain
 
@@ -1865,10 +1971,10 @@ class Transfer115(_PluginBase):
             self._sleep_if_needed()
             current = storage_chain.get_item(fileitem)
             if not current:
-                return True
+                return True, "原文件夹已不存在"
             if current.type == "file":
                 logger.warning(f"Transfer115: 源文件仍存在，跳过清理: {current.path}")
-                return False
+                return False, "源文件仍存在，整理链未移除"
 
             remaining = storage_chain.list_files(current, recursion=True) or []
             media_exts = {
@@ -1886,14 +1992,14 @@ class Transfer115(_PluginBase):
                 logger.warning(
                     f"Transfer115: 源目录仍有 {len(media_left)} 个媒体文件，跳过清理: {current.path}"
                 )
-                return False
+                return False, f"源目录仍有 {len(media_left)} 个媒体文件，已保留"
 
             storage_chain.delete_file(current)
             logger.info(f"Transfer115: 已清理整理后的源目录: {current.path}")
-            return True
+            return True, "已清理整理后的空源目录"
         except Exception as e:
             logger.debug(f"Transfer115: 清理源目录跳过: {e}")
-            return False
+            return False, f"清理源目录失败: {e}"
 
     def __list_offline_tasks(self, oper) -> List[dict]:
         if self._auth_mode == "cookie":
@@ -2145,6 +2251,12 @@ class Transfer115(_PluginBase):
                 {
                     "component": "VListItem",
                     "content": [
+                        {"component": "VListItemTitle", "text": f"冗余数据目录: {self._redundant_path or '未设置'}"},
+                    ],
+                },
+                {
+                    "component": "VListItem",
+                    "content": [
                         {"component": "VListItemTitle", "text": "上次检查"},
                         {"component": "VListItemSubtitle", "text": summary_text},
                     ],
@@ -2220,6 +2332,14 @@ class Transfer115(_PluginBase):
                 "props": {"size": "x-small", "variant": "tonal", "color": "warning"},
                 "text": "设为失败目录",
                 "events": {"click": {"api": "plugin/Transfer115/set_path", "method": "get", "params": {"field": "fail_path", "path": browse_path}}},
+            }
+        )
+        nav_buttons.append(
+            {
+                "component": "VBtn",
+                "props": {"size": "x-small", "variant": "tonal", "color": "secondary"},
+                "text": "设为冗余目录",
+                "events": {"click": {"api": "plugin/Transfer115/set_path", "method": "get", "params": {"field": "redundant_path", "path": browse_path}}},
             }
         )
 
@@ -2442,6 +2562,7 @@ class Transfer115(_PluginBase):
                 "download_path": self._download_path,
                 "library_path": self._library_path,
                 "fail_path": self._fail_path,
+                "redundant_path": self._redundant_path,
                 "transfer_type": self._transfer_type,
                 "poll_interval": self._poll_interval,
                 "api_interval": self._api_interval,
@@ -2472,6 +2593,7 @@ class Transfer115(_PluginBase):
             "download_path": "",
             "library_path": "",
             "fail_path": "",
+            "redundant_path": "",
             "transfer_type": "move",
             "poll_interval": 5,
             "api_interval": 1,

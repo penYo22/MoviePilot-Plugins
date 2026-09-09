@@ -503,7 +503,7 @@ return (_ctx, _cache) => {
   }, [
     _createElementVNode("header", _hoisted_1, [
       _createElementVNode("div", null, [
-        _cache[24] || (_cache[24] = _createElementVNode("h1", null, "115 文件管理器", -1)),
+        _cache[25] || (_cache[25] = _createElementVNode("h1", null, "115 文件管理器", -1)),
         _createElementVNode("p", null, _toDisplayString(directory.value.path || state.value.download_path || '/'), 1)
       ]),
       _createElementVNode("div", _hoisted_2, [
@@ -553,7 +553,7 @@ return (_ctx, _cache) => {
           type: "warning",
           variant: "tonal"
         }, {
-          default: _withCtx(() => [...(_cache[25] || (_cache[25] = [
+          default: _withCtx(() => [...(_cache[26] || (_cache[26] = [
             _createTextVNode("插件尚未启用，请先到设置页启用。", -1)
           ]))]),
           _: 1
@@ -567,19 +567,19 @@ return (_ctx, _cache) => {
     }, {
       default: _withCtx(() => [
         _createVNode(_component_VTab, { value: "files" }, {
-          default: _withCtx(() => [...(_cache[26] || (_cache[26] = [
+          default: _withCtx(() => [...(_cache[27] || (_cache[27] = [
             _createTextVNode("文件改名", -1)
           ]))]),
           _: 1
         }),
         _createVNode(_component_VTab, { value: "offline" }, {
-          default: _withCtx(() => [...(_cache[27] || (_cache[27] = [
+          default: _withCtx(() => [...(_cache[28] || (_cache[28] = [
             _createTextVNode("离线下载", -1)
           ]))]),
           _: 1
         }),
         _createVNode(_component_VTab, { value: "config" }, {
-          default: _withCtx(() => [...(_cache[28] || (_cache[28] = [
+          default: _withCtx(() => [...(_cache[29] || (_cache[29] = [
             _createTextVNode("插件设置", -1)
           ]))]),
           _: 1
@@ -590,7 +590,7 @@ return (_ctx, _cache) => {
     _createVNode(_component_VDivider),
     _createVNode(_component_VWindow, {
       modelValue: activeTab.value,
-      "onUpdate:modelValue": _cache[21] || (_cache[21] = $event => ((activeTab).value = $event)),
+      "onUpdate:modelValue": _cache[22] || (_cache[22] = $event => ((activeTab).value = $event)),
       touch: false
     }, {
       default: _withCtx(() => [
@@ -604,7 +604,7 @@ return (_ctx, _cache) => {
                 default: _withCtx(() => [
                   _createElementVNode("div", _hoisted_4, [
                     _createElementVNode("div", null, [
-                      _cache[29] || (_cache[29] = _createElementVNode("strong", null, "MoviePilot 文件管理器", -1)),
+                      _cache[30] || (_cache[30] = _createElementVNode("strong", null, "MoviePilot 文件管理器", -1)),
                       _createElementVNode("span", null, _toDisplayString(builtinPath.value || directory.value.path || state.value.download_path || '/'), 1)
                     ]),
                     _createElementVNode("div", _hoisted_5, [
@@ -616,7 +616,7 @@ return (_ctx, _cache) => {
                         disabled: !builtinReady.value,
                         onClick: syncSelectedFromBuiltin
                       }, {
-                        default: _withCtx(() => [...(_cache[30] || (_cache[30] = [
+                        default: _withCtx(() => [...(_cache[31] || (_cache[31] = [
                           _createTextVNode("读取勾选", -1)
                         ]))]),
                         _: 1
@@ -655,7 +655,7 @@ return (_ctx, _cache) => {
                   class: "transfer115-panel app-surface-static"
                 }, {
                   default: _withCtx(() => [
-                    _cache[32] || (_cache[32] = _createElementVNode("div", { class: "transfer115-step" }, [
+                    _cache[33] || (_cache[33] = _createElementVNode("div", { class: "transfer115-step" }, [
                       _createElementVNode("span", null, "1"),
                       _createElementVNode("div", null, [
                         _createElementVNode("strong", null, "拖选分隔文字"),
@@ -695,7 +695,7 @@ return (_ctx, _cache) => {
                         "prepend-icon": "mdi-content-cut",
                         onClick: addSelectedDelimiter
                       }, {
-                        default: _withCtx(() => [...(_cache[31] || (_cache[31] = [
+                        default: _withCtx(() => [...(_cache[32] || (_cache[32] = [
                           _createTextVNode("以此拆分", -1)
                         ]))]),
                         _: 1
@@ -728,7 +728,7 @@ return (_ctx, _cache) => {
                   class: "transfer115-panel app-surface-static"
                 }, {
                   default: _withCtx(() => [
-                    _cache[33] || (_cache[33] = _createElementVNode("div", { class: "transfer115-step" }, [
+                    _cache[34] || (_cache[34] = _createElementVNode("div", { class: "transfer115-step" }, [
                       _createElementVNode("span", null, "2"),
                       _createElementVNode("div", null, [
                         _createElementVNode("strong", null, "组合新名称"),
@@ -774,7 +774,7 @@ return (_ctx, _cache) => {
                   class: "transfer115-panel app-surface-static"
                 }, {
                   default: _withCtx(() => [
-                    _cache[35] || (_cache[35] = _createElementVNode("div", { class: "transfer115-step" }, [
+                    _cache[36] || (_cache[36] = _createElementVNode("div", { class: "transfer115-step" }, [
                       _createElementVNode("span", null, "3"),
                       _createElementVNode("div", null, [
                         _createElementVNode("strong", null, "先测试，再改名"),
@@ -802,7 +802,7 @@ return (_ctx, _cache) => {
                         disabled: !preview.value?.plan_id,
                         onClick: _cache[5] || (_cache[5] = $event => (confirmOpen.value = true))
                       }, {
-                        default: _withCtx(() => [...(_cache[34] || (_cache[34] = [
+                        default: _withCtx(() => [...(_cache[35] || (_cache[35] = [
                           _createTextVNode("确认改名", -1)
                         ]))]),
                         _: 1
@@ -938,7 +938,7 @@ return (_ctx, _cache) => {
               }, {
                 default: _withCtx(() => [
                   _createElementVNode("div", _hoisted_22, [
-                    _cache[36] || (_cache[36] = _createElementVNode("div", null, [
+                    _cache[37] || (_cache[37] = _createElementVNode("div", null, [
                       _createElementVNode("div", { class: "text-subtitle-1 font-weight-medium" }, "添加离线下载"),
                       _createElementVNode("div", { class: "text-body-2 text-medium-emphasis" }, "每行一个磁力、ed2k、HTTP 或 115 分享链接")
                     ], -1)),
@@ -969,7 +969,7 @@ return (_ctx, _cache) => {
                       color: "primary"
                     }),
                     _createElementVNode("div", null, [
-                      _cache[37] || (_cache[37] = _createElementVNode("span", null, "保存到", -1)),
+                      _cache[38] || (_cache[38] = _createElementVNode("span", null, "保存到", -1)),
                       _createElementVNode("strong", null, _toDisplayString(state.value.download_path || '115根目录'), 1)
                     ]),
                     _createVNode(_component_VBtn, {
@@ -977,7 +977,7 @@ return (_ctx, _cache) => {
                       variant: "text",
                       onClick: _cache[7] || (_cache[7] = $event => (activeTab.value = 'config'))
                     }, {
-                      default: _withCtx(() => [...(_cache[38] || (_cache[38] = [
+                      default: _withCtx(() => [...(_cache[39] || (_cache[39] = [
                         _createTextVNode("修改目录", -1)
                       ]))]),
                       _: 1
@@ -992,7 +992,7 @@ return (_ctx, _cache) => {
                       disabled: !offlineLinks.value.trim() || !state.value.enabled,
                       onClick: submitOffline
                     }, {
-                      default: _withCtx(() => [...(_cache[39] || (_cache[39] = [
+                      default: _withCtx(() => [...(_cache[40] || (_cache[40] = [
                         _createTextVNode("提交离线任务", -1)
                       ]))]),
                       _: 1
@@ -1004,7 +1004,7 @@ return (_ctx, _cache) => {
                       disabled: !state.value.enabled,
                       onClick: _cache[8] || (_cache[8] = $event => (loadOfflineTasks()))
                     }, {
-                      default: _withCtx(() => [...(_cache[40] || (_cache[40] = [
+                      default: _withCtx(() => [...(_cache[41] || (_cache[41] = [
                         _createTextVNode("刷新列表", -1)
                       ]))]),
                       _: 1
@@ -1017,7 +1017,7 @@ return (_ctx, _cache) => {
                       disabled: !state.value.enabled,
                       onClick: checkOfflineTasks
                     }, {
-                      default: _withCtx(() => [...(_cache[41] || (_cache[41] = [
+                      default: _withCtx(() => [...(_cache[42] || (_cache[42] = [
                         _createTextVNode("检查任务", -1)
                       ]))]),
                       _: 1
@@ -1030,7 +1030,7 @@ return (_ctx, _cache) => {
                       disabled: !state.value.enabled || !state.value.download_path,
                       onClick: organizeDownloads
                     }, {
-                      default: _withCtx(() => [...(_cache[42] || (_cache[42] = [
+                      default: _withCtx(() => [...(_cache[43] || (_cache[43] = [
                         _createTextVNode("整理下载目录", -1)
                       ]))]),
                       _: 1
@@ -1046,7 +1046,7 @@ return (_ctx, _cache) => {
                 default: _withCtx(() => [
                   _createElementVNode("div", _hoisted_25, [
                     _createElementVNode("div", null, [
-                      _cache[43] || (_cache[43] = _createElementVNode("strong", null, "离线任务", -1)),
+                      _cache[44] || (_cache[44] = _createElementVNode("strong", null, "离线任务", -1)),
                       _createElementVNode("span", null, "最近 " + _toDisplayString(offlineTasks.value.length) + " 个任务", 1)
                     ]),
                     (offlineLoading.value)
@@ -1188,11 +1188,18 @@ return (_ctx, _cache) => {
                       variant: "outlined",
                       "hide-details": ""
                     }, null, 8, ["modelValue"]),
+                    _createVNode(_component_VTextField, {
+                      modelValue: settings.value.redundant_path,
+                      "onUpdate:modelValue": _cache[18] || (_cache[18] = $event => ((settings.value.redundant_path) = $event)),
+                      label: "冗余数据目录",
+                      variant: "outlined",
+                      "hide-details": ""
+                    }, null, 8, ["modelValue"]),
                     (settings.value.auth_mode === 'cookie')
                       ? (_openBlock(), _createBlock(_component_VTextField, {
                           key: 0,
                           modelValue: settings.value.cookie,
-                          "onUpdate:modelValue": _cache[18] || (_cache[18] = $event => ((settings.value.cookie) = $event)),
+                          "onUpdate:modelValue": _cache[19] || (_cache[19] = $event => ((settings.value.cookie) = $event)),
                           label: "115 Cookie",
                           type: "password",
                           variant: "outlined",
@@ -1201,7 +1208,7 @@ return (_ctx, _cache) => {
                       : _createCommentVNode("", true),
                     _createVNode(_component_VTextField, {
                       modelValue: settings.value.poll_interval,
-                      "onUpdate:modelValue": _cache[19] || (_cache[19] = $event => ((settings.value.poll_interval) = $event)),
+                      "onUpdate:modelValue": _cache[20] || (_cache[20] = $event => ((settings.value.poll_interval) = $event)),
                       modelModifiers: { number: true },
                       label: "轮询间隔（分钟）",
                       type: "number",
@@ -1210,7 +1217,7 @@ return (_ctx, _cache) => {
                     }, null, 8, ["modelValue"]),
                     _createVNode(_component_VTextField, {
                       modelValue: settings.value.rename_max_files,
-                      "onUpdate:modelValue": _cache[20] || (_cache[20] = $event => ((settings.value.rename_max_files) = $event)),
+                      "onUpdate:modelValue": _cache[21] || (_cache[21] = $event => ((settings.value.rename_max_files) = $event)),
                       modelModifiers: { number: true },
                       label: "单次改名上限",
                       type: "number",
@@ -1225,7 +1232,7 @@ return (_ctx, _cache) => {
                       loading: saving.value,
                       onClick: saveSettings
                     }, {
-                      default: _withCtx(() => [...(_cache[44] || (_cache[44] = [
+                      default: _withCtx(() => [...(_cache[45] || (_cache[45] = [
                         _createTextVNode("保存设置", -1)
                       ]))]),
                       _: 1
@@ -1243,7 +1250,7 @@ return (_ctx, _cache) => {
     }, 8, ["modelValue"]),
     _createVNode(_component_VDialog, {
       modelValue: confirmOpen.value,
-      "onUpdate:modelValue": _cache[23] || (_cache[23] = $event => ((confirmOpen).value = $event)),
+      "onUpdate:modelValue": _cache[24] || (_cache[24] = $event => ((confirmOpen).value = $event)),
       "max-width": "560"
     }, {
       default: _withCtx(() => [
@@ -1256,7 +1263,7 @@ return (_ctx, _cache) => {
               _: 1
             }),
             _createVNode(_component_VCardText, null, {
-              default: _withCtx(() => [...(_cache[45] || (_cache[45] = [
+              default: _withCtx(() => [...(_cache[46] || (_cache[46] = [
                 _createTextVNode("将按刚才的测试结果修改115远端文件。执行前仍会检查文件是否存在以及是否有同名冲突。", -1)
               ]))]),
               _: 1
@@ -1266,9 +1273,9 @@ return (_ctx, _cache) => {
                 _createVNode(_component_VSpacer),
                 _createVNode(_component_VBtn, {
                   variant: "text",
-                  onClick: _cache[22] || (_cache[22] = $event => (confirmOpen.value = false))
+                  onClick: _cache[23] || (_cache[23] = $event => (confirmOpen.value = false))
                 }, {
-                  default: _withCtx(() => [...(_cache[46] || (_cache[46] = [
+                  default: _withCtx(() => [...(_cache[47] || (_cache[47] = [
                     _createTextVNode("取消", -1)
                   ]))]),
                   _: 1
@@ -1279,7 +1286,7 @@ return (_ctx, _cache) => {
                   loading: saving.value,
                   onClick: applyRename
                 }, {
-                  default: _withCtx(() => [...(_cache[47] || (_cache[47] = [
+                  default: _withCtx(() => [...(_cache[48] || (_cache[48] = [
                     _createTextVNode("确认改名", -1)
                   ]))]),
                   _: 1
@@ -1298,6 +1305,6 @@ return (_ctx, _cache) => {
 }
 
 };
-const Transfer115Workbench = /*#__PURE__*/_export_sfc(_sfc_main, [['__scopeId',"data-v-784c699e"]]);
+const Transfer115Workbench = /*#__PURE__*/_export_sfc(_sfc_main, [['__scopeId',"data-v-7acdbe25"]]);
 
 export { Transfer115Workbench as T };

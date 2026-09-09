@@ -575,6 +575,7 @@ onMounted(initialize)
               <VTextField v-model="settings.download_path" label="下载目录" variant="outlined" hide-details />
               <VTextField v-model="settings.library_path" label="媒体库目录" variant="outlined" hide-details />
               <VTextField v-model="settings.fail_path" label="失败目录" variant="outlined" hide-details />
+              <VTextField v-model="settings.redundant_path" label="冗余数据目录" variant="outlined" hide-details />
               <VTextField v-if="settings.auth_mode === 'cookie'" v-model="settings.cookie" label="115 Cookie" type="password" variant="outlined" hide-details />
               <VTextField v-model.number="settings.poll_interval" label="轮询间隔（分钟）" type="number" variant="outlined" hide-details />
               <VTextField v-model.number="settings.rename_max_files" label="单次改名上限" type="number" variant="outlined" hide-details />
