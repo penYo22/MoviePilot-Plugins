@@ -25,7 +25,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "5.3.2"
+    plugin_version = "5.3.3"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -371,8 +371,9 @@ class Transfer115(_PluginBase):
         self._split_template = str(payload.get("split_template") or self._split_template)[:255]
         self._split_keep_extension = bool(payload.get("split_keep_extension", self._split_keep_extension))
         self.__save_config()
+        self.__refresh_scheduler()
         state = self.api_plugin_state()
-        state["msg"] = "设置已保存；定时服务相关变更将在插件重新加载后生效"
+        state["msg"] = "设置已保存，自动整理定时任务已同步"
         return state
 
     def api_file_manager(self, path: str = "") -> dict:
@@ -1483,6 +1484,15 @@ class Transfer115(_PluginBase):
 
     def stop_service(self):
         self._checking = False
+
+    def __refresh_scheduler(self):
+        """按最新配置立即重建插件的自动整理定时服务。"""
+        try:
+            from app.scheduler import Scheduler
+
+            Scheduler().update_plugin_job(self.__class__.__name__)
+        except Exception as e:
+            logger.warning(f"Transfer115: 刷新自动整理定时任务失败: {e}")
 
     def _get_u115_oper(self):
         """获取MoviePilot内置115存储实例。"""
