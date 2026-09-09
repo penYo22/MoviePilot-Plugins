@@ -25,7 +25,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "5.3.3"
+    plugin_version = "5.3.4"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -753,8 +753,13 @@ class Transfer115(_PluginBase):
         folder_name = fileitem.name or Path(folder_path).name
         if state:
             self.__upsert_task_record(folder_name, "整理完成")
-            self.__cleanup_source_folder(fileitem)
-            return {"code": 0, "msg": f"整理成功: {folder_name}"}
+            cleaned = self.__cleanup_source_folder(fileitem)
+            msg = f"整理成功: {folder_name}"
+            if self._transfer_type == "copy":
+                msg += "（当前为复制模式，源文件保留）"
+            elif not cleaned:
+                msg += "（源目录仍包含媒体文件或暂时无法清理，已保留）"
+            return {"code": 0, "msg": msg}
 
         self.__upsert_task_record(folder_name, "整理失败")
         return {"code": 1, "msg": f"整理失败: {errmsg}"}
@@ -1849,22 +1854,46 @@ class Transfer115(_PluginBase):
         except Exception as e:
             logger.error(f"Transfer115: 移动失败目录异常 ({task_name}): {e}")
 
-    def __cleanup_source_folder(self, fileitem):
+    def __cleanup_source_folder(self, fileitem) -> bool:
+        """移动模式整理成功后清理已无媒体文件的源目录。"""
         if not self._cleanup_empty_folder or self._transfer_type != "move":
-            return
+            return True
         try:
             from app.chain.storage import StorageChain
 
             storage_chain = StorageChain()
             self._sleep_if_needed()
-            children = storage_chain.list_files(fileitem) or []
-            if children:
-                logger.debug(f"Transfer115: 源目录非空，跳过清理: {fileitem.path}")
-                return
-            storage_chain.delete_file(fileitem)
-            logger.info(f"Transfer115: 已清理空源目录: {fileitem.path}")
+            current = storage_chain.get_item(fileitem)
+            if not current:
+                return True
+            if current.type == "file":
+                logger.warning(f"Transfer115: 源文件仍存在，跳过清理: {current.path}")
+                return False
+
+            remaining = storage_chain.list_files(current, recursion=True) or []
+            media_exts = {
+                str(ext).lower()
+                for ext in (getattr(settings, "RMT_MEDIAEXT", None) or [])
+            }
+            media_left = [
+                item
+                for item in remaining
+                if item.type == "file"
+                and item.extension
+                and f".{str(item.extension).lower()}" in media_exts
+            ]
+            if media_left:
+                logger.warning(
+                    f"Transfer115: 源目录仍有 {len(media_left)} 个媒体文件，跳过清理: {current.path}"
+                )
+                return False
+
+            storage_chain.delete_file(current)
+            logger.info(f"Transfer115: 已清理整理后的源目录: {current.path}")
+            return True
         except Exception as e:
             logger.debug(f"Transfer115: 清理源目录跳过: {e}")
+            return False
 
     def __list_offline_tasks(self, oper) -> List[dict]:
         if self._auth_mode == "cookie":
