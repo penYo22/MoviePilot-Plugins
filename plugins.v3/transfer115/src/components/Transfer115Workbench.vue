@@ -78,8 +78,15 @@ function assertResult(result) {
 
 function notify(message, color = 'success') {
   const method = ['error', 'info', 'warning', 'success'].includes(color) ? color : 'success'
-  if (typeof hostToast?.[method] === 'function') hostToast[method](message)
-  else if (method === 'error') error.value = message
+  if (method === 'error') error.value = message
+  else error.value = ''
+  if (typeof hostToast?.[method] === 'function') {
+    try {
+      hostToast[method](message)
+    } catch (err) {
+      console.warn('Transfer115 toast failed:', err)
+    }
+  }
 }
 
 function baseName(path) {
@@ -212,9 +219,9 @@ async function loadDirectory(path = '', { clearSelection = true } = {}) {
   }
 }
 
-async function loadOfflineTasks({ quiet = false } = {}) {
+async function loadOfflineTasks({ quiet = false, background = false } = {}) {
   if (!state.value.enabled) return
-  offlineLoading.value = true
+  if (!background) offlineLoading.value = true
   try {
     const result = assertResult(unwrap(await props.api.get(`${pluginBase.value}/offline_tasks`)))
     offlineTasks.value = result.tasks || []
@@ -222,7 +229,7 @@ async function loadOfflineTasks({ quiet = false } = {}) {
   } catch (err) {
     if (!quiet) notify(err?.message || '读取离线任务失败', 'error')
   } finally {
-    offlineLoading.value = false
+    if (!background) offlineLoading.value = false
   }
 }
 
@@ -237,8 +244,8 @@ async function submitOffline() {
       links: offlineLinks.value,
     })))
     offlineLinks.value = ''
-    await loadOfflineTasks({ quiet: true })
     notify(result.msg || '离线任务已提交')
+    void loadOfflineTasks({ quiet: true, background: true })
     emit('action')
   } catch (err) {
     notify(err?.message || '提交离线任务失败', 'error')

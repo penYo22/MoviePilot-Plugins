@@ -1,6 +1,7 @@
 import datetime
 import json
 import re
+import threading
 import time
 import uuid
 from pathlib import Path, PurePosixPath
@@ -24,7 +25,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "5.3.1"
+    plugin_version = "5.3.2"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -1511,6 +1512,28 @@ class Transfer115(_PluginBase):
         if self._api_interval > 0:
             time.sleep(self._api_interval)
 
+    def __run_background(self, worker, name: str = "Transfer115Background"):
+        try:
+            threading.Thread(target=worker, name=name, daemon=True).start()
+        except Exception as e:
+            logger.warning(f"Transfer115: 启动后台任务失败: {e}")
+
+    def __send_notification(self, mtype: NotificationType, title: str, text: str):
+        if not self._notify_enabled:
+            return
+        try:
+            self.post_message(mtype=mtype, title=title, text=text)
+        except Exception as e:
+            logger.warning(f"Transfer115: 发送通知失败: {e}")
+
+    def __send_notification_async(self, mtype: NotificationType, title: str, text: str):
+        if not self._notify_enabled:
+            return
+        self.__run_background(
+            lambda: self.__send_notification(mtype=mtype, title=title, text=text),
+            "Transfer115Notify",
+        )
+
     def _get_folder_id_by_path_cookie(self, path: str, oper) -> Optional[int]:
         try:
             parts = [p for p in self.__clean_path(path).strip("/").split("/") if p]
@@ -1564,13 +1587,17 @@ class Transfer115(_PluginBase):
                 raise RuntimeError(error)
 
             logger.info(f"Transfer115: 添加离线任务成功，共 {len(lines)} 条")
-            self.__record_recent_tasks(oper)
-            if self._notify_enabled:
-                self.post_message(
+
+            def after_submit():
+                time.sleep(max(1, self._api_interval))
+                self.__record_recent_tasks(oper)
+                self.__send_notification(
                     mtype=NotificationType.Organize,
                     title="115离线任务已提交",
                     text=f"已提交 {len(lines)} 条离线下载任务",
                 )
+
+            self.__run_background(after_submit, "Transfer115AfterSubmit")
             return {
                 "code": 0,
                 "msg": f"已提交 {len(lines)} 条离线下载任务",
@@ -1580,12 +1607,11 @@ class Transfer115(_PluginBase):
         except Exception as e:
             logger.error(f"Transfer115: 添加离线任务失败: {e}")
             self.__upsert_task_record("离线任务提交", "提交失败")
-            if self._notify_enabled:
-                self.post_message(
-                    mtype=NotificationType.Manual,
-                    title="115离线任务提交失败",
-                    text=str(e),
-                )
+            self.__send_notification_async(
+                mtype=NotificationType.Manual,
+                title="115离线任务提交失败",
+                text=str(e),
+            )
             return {"code": 1, "msg": f"离线任务提交失败: {e}", "submitted": 0}
 
     @staticmethod
