@@ -25,7 +25,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "5.3.5"
+    plugin_version = "5.3.6"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -751,6 +751,17 @@ class Transfer115(_PluginBase):
         folder_path = self.__clean_path(folder_path)
         if not folder_path:
             return {"code": 1, "msg": "缺少参数: folder_path"}
+        download_root = self.__clean_path(self._download_path)
+        if not download_root:
+            return {"code": 1, "msg": "未设置下载目录，无法整理"}
+        if folder_path == download_root:
+            return {"code": 1, "msg": "请选择下载目录下的具体文件夹，不能直接整理下载目录本身"}
+        if download_root == "/":
+            allowed = folder_path.startswith("/")
+        else:
+            allowed = folder_path.startswith(f"{download_root}/")
+        if not allowed:
+            return {"code": 1, "msg": f"只允许整理下载目录内的文件夹: {download_root}"}
 
         fileitem = self.__build_folder_fileitem(folder_path=folder_path, fileid=fileid)
         if not fileitem:
@@ -1725,9 +1736,15 @@ class Transfer115(_PluginBase):
                 self.__save_poll_summary(summary)
                 return
 
+            # 只整理配置下载目录中真实存在的任务文件夹，避免115历史任务记录被反复整理。
+            download_child_paths = self.__list_download_child_paths()
+            if download_child_paths is None:
+                logger.warning("Transfer115: 无法读取下载目录，本轮跳过整理，避免误判已删除任务")
+
             processed = set(self.get_data("processed_tasks") or [])
             failed_tasks: Dict[str, int] = self.get_data("failed_tasks") or {}
             done_wait: Dict[str, int] = self.__load_done_wait()
+            existence_cache: Dict[str, bool] = {}
             changed = False
 
             for task in tasks:
@@ -1750,6 +1767,25 @@ class Transfer115(_PluginBase):
                 if not self.__is_task_finished(task):
                     summary["downloading"] += 1
                     self.__upsert_task_record(task_name, "下载中")
+                    continue
+
+                if download_child_paths is None:
+                    summary["skipped"] += 1
+                    continue
+
+                source_path = self.__task_source_path(task=task, task_name=task_name)
+                if not source_path or not self.__task_source_path_exists(
+                    source_path=source_path,
+                    download_child_paths=download_child_paths,
+                    cache=existence_cache,
+                ):
+                    logger.info(f"Transfer115: 源文件夹已不在下载目录，跳过后续整理: {task_name}")
+                    processed.add(task_key)
+                    failed_tasks.pop(task_key, None)
+                    done_wait.pop(task_key, None)
+                    self.__upsert_task_record(task_name, "已跳过")
+                    summary["skipped"] += 1
+                    changed = True
                     continue
 
                 summary["completed"] += 1
@@ -1870,7 +1906,7 @@ class Transfer115(_PluginBase):
                 self._sleep_if_needed()
                 oper.fs_move([int(folder_id)], pid=int(fail_folder_id))
             else:
-                task_path = self.__task_folder_path(task=task, task_name=task_name)
+                task_path = self.__task_source_path(task=task, task_name=task_name)
                 task_item = oper.get_item(Path(task_path)) if task_path else None
                 if not task_item:
                     logger.warning(f"Transfer115: 无法获取任务文件夹，跳过移动: {task_name}")
@@ -2114,8 +2150,82 @@ class Transfer115(_PluginBase):
             return f"/{task_file_path}"
         return f"{self._download_path.rstrip('/')}/{task_name}"
 
+    def __task_source_path(self, task: dict, task_name: str) -> str:
+        """解析任务在配置下载目录内的真实源路径，目录外的任务不整理。"""
+        download_root = self.__clean_path(self._download_path)
+        if not download_root:
+            return ""
+        folder_path = self.__clean_path(self.__task_folder_path(task=task, task_name=task_name))
+        if not folder_path or folder_path == download_root:
+            folder_path = self.__clean_path(f"{download_root.rstrip('/')}/{task_name}")
+        if not folder_path or folder_path == download_root:
+            return ""
+        if download_root == "/":
+            return folder_path if folder_path.startswith("/") else ""
+        if not folder_path.startswith(f"{download_root}/"):
+            return ""
+        return folder_path
+
+    def __list_download_child_paths(self) -> Optional[set]:
+        """列出配置下载目录的直接子项路径，用于确认任务文件夹是否仍然存在。"""
+        if not self._download_path:
+            return None
+        try:
+            from app.chain.storage import StorageChain
+            from app.schemas import FileItem
+
+            root = FileItem(storage="u115", path=self.__dir_path(self._download_path), type="dir")
+            self._sleep_if_needed()
+            root_item = StorageChain().get_item(root)
+            if not root_item:
+                logger.warning(f"Transfer115: 下载目录不存在或无法访问: {self._download_path}")
+                return None
+            self._sleep_if_needed()
+            items = StorageChain().list_files(root_item) or []
+            paths = set()
+            for item in items:
+                item_path = self.__clean_path(str(getattr(item, "path", "") or ""))
+                if item_path:
+                    paths.add(item_path)
+            return paths
+        except Exception as e:
+            logger.warning(f"Transfer115: 读取下载目录列表失败: {e}")
+            return None
+
+    def __task_source_path_exists(
+        self,
+        source_path: str,
+        download_child_paths: set,
+        cache: Dict[str, bool],
+    ) -> bool:
+        """优先用本轮目录快照判断，深层路径再按需做一次远端确认。"""
+        if source_path in download_child_paths:
+            return True
+        download_root = self.__clean_path(self._download_path)
+        root_depth = len([part for part in download_root.split("/") if part])
+        path_depth = len([part for part in source_path.split("/") if part])
+        if path_depth <= root_depth + 1:
+            return False
+        if source_path in cache:
+            return cache[source_path]
+        try:
+            from app.chain.storage import StorageChain
+            from app.schemas import FileItem
+
+            self._sleep_if_needed()
+            found = StorageChain().get_item(
+                FileItem(storage="u115", path=self.__dir_path(source_path), type="dir")
+            )
+            cache[source_path] = found is not None
+        except Exception as e:
+            logger.debug(f"Transfer115: 确认任务源路径失败，按存在处理: {e}")
+            cache[source_path] = True
+        return cache[source_path]
+
     def __build_task_fileitem(self, task: dict, task_name: str):
-        folder_path = self.__task_folder_path(task=task, task_name=task_name)
+        folder_path = self.__task_source_path(task=task, task_name=task_name)
+        if not folder_path:
+            return None
         fileid = str(task.get("file_id") or task.get("cid") or "")
         return self.__build_folder_fileitem(folder_path=folder_path, fileid=fileid)
 
@@ -2415,6 +2525,8 @@ class Transfer115(_PluginBase):
                 status_text = "📥 下载完成"
             elif status == "提交失败":
                 status_text = "❌ 提交失败"
+            elif status == "已跳过":
+                status_text = "⏭ 已跳过"
             else:
                 status_text = "⏳ 下载中"
             rows.append(
