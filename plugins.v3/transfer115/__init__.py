@@ -25,7 +25,7 @@ class Transfer115(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "5.3.6"
+    plugin_version = "5.3.7"
     # 插件作者
     plugin_author = "penYo22"
     # 作者主页
@@ -1115,10 +1115,47 @@ class Transfer115(_PluginBase):
         rendered = rendered.replace("{stem}", stem).replace("{name}", name).replace("{ext}", suffix)
         rendered = re.sub(r"\{(\d+)\}", replace_part, rendered)
         rendered = re.sub(r"\s+", " ", rendered).strip(" .-_")
+        rendered = cls.__normalize_season_episode(rendered)
         new_name = cls.__safe_name(rendered)
         if keep_extension and suffix and new_name and not new_name.casefold().endswith(suffix.casefold()):
             new_name = cls.__safe_name(f"{new_name}{suffix}")
         return parts, new_name
+
+    @staticmethod
+    def __normalize_season_episode(name: str) -> str:
+        """把 S02 01、S02-01、S0201 等写法统一成 MoviePilot 可识别的 S02E01。"""
+        text = str(name or "")
+        if not text:
+            return text
+
+        def canonical(match: re.Match) -> str:
+            season = int(match.group(1))
+            episode = int(match.group(2))
+            episode_text = f"{episode:02d}" if episode < 100 else str(episode)
+            return f"S{season:02d}E{episode_text}"
+
+        # 带 E 或分隔符的季集：S02E01 / S02 01 / S02-01 / S02_01
+        text = re.sub(
+            r"S(\d{1,2})(?!\d)(?:\s*[-_.]\s*|\s*E\s*|\s+)(\d{1,4})(?!\d)(?![PpKk])",
+            canonical,
+            text,
+            flags=re.IGNORECASE,
+        )
+        # 集号带前导零的连写：S0201，避免把 S0212 这类有歧义的写法改错。
+        text = re.sub(
+            r"S(\d{1,2})(0\d{1,3})(?!\d)(?![PpKk])",
+            canonical,
+            text,
+            flags=re.IGNORECASE,
+        )
+        # 季集标记紧贴标题时补一个空格，避免标题和 SxxExx 被当成同一个词。
+        text = re.sub(
+            r"(?<=[A-Za-z0-9])S(\d{1,2})E(\d{1,4})",
+            r" S\1E\2",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return text
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
