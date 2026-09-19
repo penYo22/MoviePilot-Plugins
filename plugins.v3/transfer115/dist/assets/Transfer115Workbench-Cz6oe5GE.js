@@ -178,9 +178,9 @@ function readBuiltinPath(doc) {
   const toolbar = doc.querySelector('.file-browser-toolbar');
   if (!toolbar) return null
   const segments = Array.from(toolbar.querySelectorAll('button.v-btn'))
+    .filter(button => button.querySelector('[class*="mdi-chevron-right"]'))
     .map(button => (button.textContent || '').replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .slice(1);
+    .filter(Boolean);
   return segments.length ? `/${segments.join('/')}/` : '/'
 }
 
@@ -237,12 +237,8 @@ async function syncSelectedFromBuiltin() {
     preview.value = null;
     notify(`已同步 ${selectedPaths.value.length} 个勾选文件`);
   } catch (err) {
-    selectedPaths.value = [...new Set(names.map(name => joinPath(path, name)))];
-    samplePath.value = selectedPaths.value[0] || '';
-    builtinPath.value = path;
-    directory.value.path = path;
     preview.value = null;
-    notify(`已同步 ${selectedPaths.value.length} 个勾选文件`);
+    notify(`读取勾选目录失败：${err?.message || path}`, 'error');
   }
 }
 
